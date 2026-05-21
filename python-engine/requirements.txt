@@ -1,0 +1,25 @@
+# Conexión Odoo
+# (xmlrpc viene en la stdlib de Python, no requiere instalación)
+
+# Lectura de ficheros
+pandas>=2.1.0
+openpyxl>=3.1.0          # Excel
+pyodbc>=5.0.0            # Access (.mdb/.accdb) y SQL Server
+pymysql>=1.1.0           # MySQL
+psycopg2-binary>=2.9.0   # PostgreSQL (por si origen es Postgres)
+
+# IA para mapeo automático
+anthropic>=0.40.0
+
+# Validaciones
+python-stdnum>=1.20      # Validación de NIFs/CIFs internacionales
+phonenumbers>=8.13.0     # Validación de teléfonos
+email-validator>=2.1.0
+
+# Utilidades
+pydantic>=2.5.0          # Schemas estructurados para comunicación con frontend
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0

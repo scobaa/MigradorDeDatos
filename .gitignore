@@ -1,0 +1,32 @@
+# Node
+node_modules/
+dist/
+*.log
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Python
+python-engine/__pycache__/
+python-engine/**/__pycache__/
+python-engine/.pytest_cache/
+python-engine/.venv/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Secretos
+.env
+.env.local
+*.pem
+
+# Datos sensibles de pruebas locales
+test-data/
+*.mdb
+*.accdb
+clientes_*.xlsx
+clientes_*.csv
