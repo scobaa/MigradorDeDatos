@@ -1,0 +1,1 @@
+{"command":"suggest_mapping","args":{"columns":["CODCLI","NIFCLI","NOFCLI","NOCCLI","DOMCLI","POBCLI","CPOCLI","PROCLI","TELCLI","FAXCLI","MOVCLI","EMACLI","WEBCLI","PAICLI","OBSCLI","MEMCLI","CODCLI","FPACLI","TARCLI","BANCLI"],"model":"res.partner"}}

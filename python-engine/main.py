@@ -130,8 +130,20 @@ def handle_analyze_source(args: dict) -> None:
 
 
 def handle_suggest_mapping(args: dict) -> None:
-    """Pide a Claude que sugiera mapeo de columnas origen → campos Odoo (Fase 2)."""
-    respond("error", error="Mapeo con IA: pendiente para la Fase 2")
+    """
+    Llama a Claude para detectar el ERP y sugerir mapeo de columnas.
+
+    args: {columns: [...], model?: "res.partner", api_key?: "sk-ant-..."}
+    La api_key también se puede pasar como variable de entorno ANTHROPIC_API_KEY.
+    """
+    from migrator.ai_mapper import suggest_mapping
+
+    columns = args["columns"]
+    model = args.get("model", "res.partner")
+    api_key = args.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
+
+    result = suggest_mapping(columns=columns, target_model=model, api_key=api_key)
+    respond("ok", data=result)
 
 
 def handle_preview_migration(args: dict) -> None:
@@ -191,7 +203,10 @@ def handle_run_migration(args: dict) -> None:
         supplier_rank=opts.get("supplier_rank", 0),
         infer_company=opts.get("infer_company", True),
         update_existing=opts.get("update_existing", True),
+        ref_prefix=opts.get("ref_prefix", ""),
     )
+
+    limit: int | None = int(args["limit"]) if args.get("limit") else None
 
     odoo = OdooClient(
         OdooConfig(
@@ -205,8 +220,10 @@ def handle_run_migration(args: dict) -> None:
 
     migrator = PartnerMigrator(odoo, mapping, options)
     with _open_connector(path) as conn:
-        total = conn.count_rows(table)
-        stats = migrator.run(conn.iter_rows(table), total=total, dry_run=dry_run)
+        total = limit if limit else conn.count_rows(table)
+        stats = migrator.run(
+            conn.iter_rows(table, limit=limit), total=total, dry_run=dry_run
+        )
 
     respond("ok", data={"dry_run": dry_run, "stats": stats.as_dict()})
 

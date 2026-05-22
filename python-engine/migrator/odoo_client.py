@@ -9,11 +9,55 @@ recibe una instancia de esta clase.
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 import xmlrpc.client
 from dataclasses import dataclass
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+_PAREN_RE = re.compile(r"\s*\([^)]*\)")
+
+
+def _ascii_lower(text: str) -> str:
+    """Quita tildes/diacríticos y pasa a minúsculas ('Álava' → 'alava')."""
+    return (
+        unicodedata.normalize("NFD", text)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+
+
+def _state_name_variants(name: str) -> set[str]:
+    """
+    Genera todas las claves de búsqueda para el nombre de una provincia/estado.
+
+    Odoo 19 usa nombres bilingües/oficiales como 'Araba/Álava',
+    'Bizkaia (Vizcaya)' o 'Alacant (Alicante)'. Este helper produce variantes
+    sin tildes y fragmentos individuales para que una búsqueda por 'ALAVA'
+    o 'ALICANTE' resuelva aunque el nombre oficial sea diferente.
+    """
+    keys: set[str] = set()
+
+    def _add(s: str) -> None:
+        s = s.strip()
+        if s:
+            keys.add(s.lower())
+            keys.add(_ascii_lower(s))
+
+    _add(name)
+    # Fragmentar por "/" (ej. "Araba/Álava" → ["Araba", "Álava"])
+    for part in name.split("/"):
+        _add(part)
+    # Contenido entre paréntesis (ej. "Bizkaia (Vizcaya)" → "Vizcaya")
+    for m in re.finditer(r"\(([^)]+)\)", name):
+        _add(m.group(1))
+    # Nombre sin el paréntesis (ej. "Bizkaia (Vizcaya)" → "Bizkaia")
+    _add(_PAREN_RE.sub("", name))
+
+    return keys
 
 
 @dataclass
@@ -42,6 +86,7 @@ class OdooClient:
         self._states: dict[tuple[int, str], int] = {}
         self._accounts: dict[str, int] = {}
         self._taxes: dict[tuple[str, str], int] = {}
+        self._valid_fields: dict[str, set[str]] = {}
 
     # ─── Conexión ──────────────────────────────────────────
 
@@ -145,10 +190,14 @@ class OdooClient:
     def get_state_id(self, country_id: int, value: str | None) -> int | None:
         if not value or not country_id:
             return None
-        key = (country_id, value.strip().lower())
         if not self._states:
             self._load_states()
-        return self._states.get(key)
+        # Buscar primero por el valor tal cual, luego sin tildes.
+        for key in (value.strip().lower(), _ascii_lower(value.strip())):
+            sid = self._states.get((country_id, key))
+            if sid:
+                return sid
+        return None
 
     def _load_states(self) -> None:
         log.debug("Cargando catálogo res.country.state")
@@ -157,8 +206,28 @@ class OdooClient:
         )
         for r in recs:
             cid = r["country_id"][0]
-            self._states[(cid, r["name"].lower())] = r["id"]
-            self._states[(cid, r["code"].lower())] = r["id"]
+            sid = r["id"]
+            for key in _state_name_variants(r["name"]):
+                self._states.setdefault((cid, key), sid)
+            self._states.setdefault((cid, r["code"].lower()), sid)
+            self._states.setdefault((cid, _ascii_lower(r["code"])), sid)
+
+    def get_valid_fields(self, model: str) -> set[str]:
+        """Retorna el conjunto de campos válidos del modelo (cacheado)."""
+        if model not in self._valid_fields:
+            info = self.execute(model, "fields_get", attributes=["string"])
+            self._valid_fields[model] = set(info.keys())
+            log.debug("Campos válidos de %s: %d", model, len(self._valid_fields[model]))
+        return self._valid_fields[model]
+
+    def filter_vals(self, model: str, vals: dict) -> dict:
+        """Elimina de vals los campos que no existen en el modelo Odoo."""
+        valid = self.get_valid_fields(model)
+        filtered = {k: v for k, v in vals.items() if k in valid}
+        removed = set(vals) - set(filtered)
+        if removed:
+            log.warning("Campos eliminados por no existir en %s: %s", model, sorted(removed))
+        return filtered
 
     def get_account_id(self, code: str) -> int | None:
         """Cuenta contable por código (ej '700', '430')."""
