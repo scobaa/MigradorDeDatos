@@ -69,7 +69,7 @@ class AccessConnector:
 
         conn_str = f"DRIVER={{{ACCESS_DRIVER}}};DBQ={self.path};"
         log.info("Conectando a Access: %s", self.path)
-        self._conn = pyodbc.connect(conn_str, readonly=True)
+        self._conn = pyodbc.connect(conn_str, readonly=True, timeout=5)
 
         # El driver de Access devuelve texto como UTF-16; algunos ERPs (FactuSOL,
         # etc.) guardan registros con bytes corruptos (surrogates sueltos) que

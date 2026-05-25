@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import xmlrpc.client
 from dataclasses import dataclass, field
@@ -64,6 +65,7 @@ class MigrationOptions:
     infer_company: bool = True
     update_existing: bool = True  # si False, los duplicados se omiten
     ref_prefix: str = ""          # prefijo para el campo ref (ej. "cli_" en FactuSOL)
+    external_id_prefix: str = "cli_"
 
 
 @dataclass
@@ -242,9 +244,40 @@ class PartnerMigrator:
 
     def _process_row(self, row: dict[str, Any], dry_run: bool) -> str:
         """
-        Transforma y escribe una fila. Devuelve la acción realizada:
+        Transforma y escribe una fila de la empresa y su contacto relacionado si existe.
+        Devuelve la acción realizada para la empresa principal:
         'created' | 'updated' | 'skipped'.
         """
+        # 1. Obtener mapeo inverso para los campos virtuales especiales
+        rev_mapping = {v: k for k, v in self.mapping.items()}
+
+        external_id_col = rev_mapping.get("__external_id")
+        contact_name_col = rev_mapping.get("contact_name")
+        contact_email_col = rev_mapping.get("contact_email")
+        contact_phone_col = rev_mapping.get("contact_phone")
+        contact_mobile_col = rev_mapping.get("contact_mobile")
+
+        # 2. Extraer valor de ID externa si está mapeada
+        raw_ext_id = None
+        if external_id_col:
+            raw_ext_id = row.get(external_id_col)
+
+        company_xml_id = None
+        if raw_ext_id is not None:
+            # Limpiar el valor para evitar decimales si Excel lo leyó como float (ej: "15.0" -> "15")
+            cleaned_ext_id = str(raw_ext_id).strip()
+            if cleaned_ext_id.endswith(".0"):
+                cleaned_ext_id = cleaned_ext_id[:-2]
+            if cleaned_ext_id:
+                prefix = self.options.external_id_prefix or ""
+                company_xml_id = f"{prefix}{cleaned_ext_id}"
+
+        # 3. Buscar duplicado por ID externa primero
+        existing_id = None
+        if company_xml_id:
+            existing_id = self.odoo.get_xml_id_res_id(company_xml_id, PARTNER_MODEL)
+
+        # 4. Transformar los datos de la empresa principal
         vals = transform_partner(
             row,
             self.mapping,
@@ -258,23 +291,156 @@ class PartnerMigrator:
         self._resolve_geo(vals)
         vals = self.odoo.filter_vals(PARTNER_MODEL, vals)
 
-        existing_id = self.find_duplicate(vals)
+        # 5. Si no se encontró por ID externa, buscar por deduplicación normal (NIF, nombre, ref)
+        if not existing_id:
+            existing_id = self.find_duplicate(vals)
+
+        # 6. Crear o actualizar la empresa
+        action = "created"
+        company_id = existing_id
 
         if existing_id:
             if not self.options.update_existing:
-                return "skipped"
+                action = "skipped"
+            else:
+                if not dry_run:
+                    # No pisar customer/supplier_rank de un partner ya existente.
+                    update_vals = {
+                        k: v for k, v in vals.items()
+                        if k not in ("customer_rank", "supplier_rank")
+                    }
+                    self.odoo.write(PARTNER_MODEL, [existing_id], update_vals)
+                action = "updated"
+        else:
             if not dry_run:
-                # No pisar customer/supplier_rank de un partner ya existente.
-                update_vals = {
-                    k: v for k, v in vals.items()
-                    if k not in ("customer_rank", "supplier_rank")
-                }
-                self.odoo.write(PARTNER_MODEL, [existing_id], update_vals)
-            return "updated"
+                company_id = self._create_with_vat_fallback(vals)
+            action = "created"
 
-        if not dry_run:
-            self._create_with_vat_fallback(vals)
-        return "created"
+        # 7. Vincular XML ID de la empresa en ir.model.data si no existía ya
+        if not dry_run and company_xml_id and company_id:
+            self.odoo.create_or_update_xml_id(company_xml_id, PARTNER_MODEL, company_id)
+
+        # 8. Procesar contacto relacionado si está mapeado
+        if contact_name_col:
+            from transformers.partners import clean_str, clean_email, clean_phone
+            raw_contact_name = row.get(contact_name_col)
+            contact_name = clean_str(raw_contact_name)
+
+            if contact_name:
+                contact_email = clean_email(row.get(contact_email_col)) if contact_email_col else None
+                contact_phone = clean_phone(row.get(contact_phone_col), self.options.default_country) if contact_phone_col else None
+                contact_mobile = clean_phone(row.get(contact_mobile_col), self.options.default_country) if contact_mobile_col else None
+
+                contact_vals = {
+                    "name": contact_name,
+                    "is_company": False,
+                    "type": "contact",
+                }
+                if company_id:
+                    contact_vals["parent_id"] = company_id
+                if contact_email:
+                    contact_vals["email"] = contact_email
+                if contact_phone:
+                    contact_vals["phone"] = contact_phone
+                if contact_mobile:
+                    contact_vals["mobile"] = contact_mobile
+
+                contact_vals = self.odoo.filter_vals(PARTNER_MODEL, contact_vals)
+
+                # Deduplicar el contacto
+                contact_id = None
+                contact_xml_id = None
+
+                if company_xml_id:
+                    contact_xml_id = f"{company_xml_id}_contact"
+                    contact_id = self.odoo.get_xml_id_res_id(contact_xml_id, PARTNER_MODEL)
+
+                # Si no se encuentra por XML ID pero tenemos ID de empresa, buscar por nombre bajo la empresa
+                if not contact_id and company_id:
+                    domain = [
+                        ("parent_id", "=", company_id),
+                        ("name", "=", contact_name),
+                        ("is_company", "=", False),
+                    ]
+                    c_ids = self.odoo.search(PARTNER_MODEL, domain, limit=1)
+                    if c_ids:
+                        contact_id = c_ids[0]
+
+                # Crear o actualizar contacto relacionado
+                if contact_id:
+                    if self.options.update_existing and not dry_run:
+                        self.odoo.write(PARTNER_MODEL, [contact_id], contact_vals)
+                else:
+                    if not dry_run:
+                        contact_id = self.odoo.create(PARTNER_MODEL, contact_vals)
+
+                # Registrar XML ID del contacto
+                if not dry_run and contact_xml_id and contact_id:
+                    self.odoo.create_or_update_xml_id(contact_xml_id, PARTNER_MODEL, contact_id)
+
+        # 9. Procesar cuenta bancaria si está mapeada
+        bank_acc_col = rev_mapping.get("bank_acc_number")
+        bank_name_col = rev_mapping.get("bank_name")
+
+        if bank_acc_col:
+            raw_acc_num = row.get(bank_acc_col)
+            if raw_acc_num is not None:
+                # Limpieza básica de la cuenta bancaria (sin espacios ni guiones)
+                cleaned_acc_num = str(raw_acc_num).strip().upper()
+                cleaned_acc_num = re.sub(r"[\s\-]", "", cleaned_acc_num)
+                # Si Excel leyó como float con .0 al final
+                if cleaned_acc_num.endswith(".0"):
+                    cleaned_acc_num = cleaned_acc_num[:-2]
+
+                if cleaned_acc_num and company_id:
+                    bank_xml_id = None
+                    if company_xml_id:
+                        bank_xml_id = f"{company_xml_id}_bank"
+
+                    # 1. Buscar si la cuenta ya existe
+                    bank_acc_id = None
+                    if bank_xml_id:
+                        bank_acc_id = self.odoo.get_xml_id_res_id(bank_xml_id, "res.partner.bank")
+
+                    if not bank_acc_id:
+                        # Buscar por número de cuenta exacto bajo el mismo partner
+                        domain = [
+                            ("partner_id", "=", company_id),
+                            ("acc_number", "=", cleaned_acc_num)
+                        ]
+                        b_ids = self.odoo.search("res.partner.bank", domain, limit=1)
+                        if b_ids:
+                            bank_acc_id = b_ids[0]
+
+                    # 2. Crear o actualizar cuenta bancaria
+                    if not bank_acc_id:
+                        # Resolver banco id si existe bank_name
+                        bank_id = None
+                        if bank_name_col:
+                            raw_bank_name = row.get(bank_name_col)
+                            if raw_bank_name:
+                                bank_id = self.odoo.get_or_create_bank(str(raw_bank_name))
+
+                        bank_vals = {
+                            "acc_number": cleaned_acc_num,
+                            "partner_id": company_id,
+                        }
+                        if bank_id:
+                            bank_vals["bank_id"] = bank_id
+
+                        if not dry_run:
+                            try:
+                                log.info("Creando cuenta bancaria para partner_id=%s: %s", company_id, cleaned_acc_num)
+                                bank_acc_id = self.odoo.create("res.partner.bank", bank_vals)
+                            except Exception as e:
+                                # Capturar fallos (ej. validación estricta de IBAN en Odoo) y no interrumpir
+                                log.warning("No se pudo crear la cuenta bancaria %r: %s", cleaned_acc_num, e)
+
+                    # Vincular XML ID del banco
+                    if not dry_run and bank_xml_id and bank_acc_id:
+                        self.odoo.create_or_update_xml_id(bank_xml_id, "res.partner.bank", bank_acc_id)
+
+        return action
 
     def _create_with_vat_fallback(self, vals: dict[str, Any]) -> int:
         """

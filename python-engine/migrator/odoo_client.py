@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+import socket
 import xmlrpc.client
 from dataclasses import dataclass
 from typing import Any
@@ -92,6 +93,8 @@ class OdooClient:
 
     def connect(self) -> None:
         """Autentica contra Odoo. Lanza ConnectionError si falla."""
+        # Establecer el timeout predeterminado a nivel de socket para compatibilidad con todas las versiones de Python
+        socket.setdefaulttimeout(15.0)
         common = xmlrpc.client.ServerProxy(f"{self.config.url}/xmlrpc/2/common")
         self.uid = common.authenticate(
             self.config.db, self.config.username, self.config.password, {}
@@ -250,3 +253,75 @@ class OdooClient:
             )
             self._taxes[key] = ids[0] if ids else None
         return self._taxes[key]
+
+    def get_xml_id_res_id(self, xml_id: str, model: str) -> int | None:
+        """Busca el ID de base de datos para una ID externa (XML ID) en ir.model.data."""
+        if not xml_id:
+            return None
+        module = "__import__"
+        name = xml_id
+        if "." in xml_id:
+            parts = xml_id.split(".", 1)
+            module = parts[0]
+            name = parts[1]
+
+        domain = [
+            ("module", "=", module),
+            ("name", "=", name),
+            ("model", "=", model),
+        ]
+        recs = self.search_read("ir.model.data", domain, ["res_id"], limit=1)
+        return recs[0]["res_id"] if recs else None
+
+    def create_or_update_xml_id(self, xml_id: str, model: str, res_id: int) -> None:
+        """Crea o actualiza la vinculación de ID externa en ir.model.data."""
+        if not xml_id or not res_id:
+            return
+        module = "__import__"
+        name = xml_id
+        if "." in xml_id:
+            parts = xml_id.split(".", 1)
+            module = parts[0]
+            name = parts[1]
+
+        domain = [
+            ("module", "=", module),
+            ("name", "=", name),
+            ("model", "=", model),
+        ]
+        ids = self.search("ir.model.data", domain, limit=1)
+
+        vals = {
+            "module": module,
+            "name": name,
+            "model": model,
+            "res_id": res_id,
+        }
+
+        if ids:
+            self.write("ir.model.data", ids, vals)
+        else:
+            self.create("ir.model.data", vals)
+
+    def get_or_create_bank(self, bank_name: str) -> int | None:
+        """Busca una entidad bancaria por nombre en res.bank. Si no existe, la crea."""
+        if not bank_name:
+            return None
+
+        name_clean = bank_name.strip()
+        if not name_clean:
+            return None
+
+        # Intentar buscar por nombre exacto
+        domain = [("name", "=", name_clean)]
+        ids = self.search("res.bank", domain, limit=1)
+        if ids:
+            return ids[0]
+
+        # Si no existe, crear el banco
+        try:
+            log.info("Creando entidad bancaria en res.bank: %s", name_clean)
+            return self.create("res.bank", {"name": name_clean})
+        except Exception as e:
+            log.warning("No se pudo crear la entidad bancaria %r: %s", name_clean, e)
+            return None

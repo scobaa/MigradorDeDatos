@@ -99,15 +99,20 @@ def handle_test_connection(args: dict) -> None:
 
 
 def _open_connector(path: str):
-    """Devuelve un connector de lectura según la extensión del fichero."""
+    """Devuelve un conector de lectura según la extensión del fichero."""
     ext = os.path.splitext(path)[1].lower()
     if ext in (".accdb", ".mdb"):
         from connectors.access import AccessConnector
-
         return AccessConnector(path)
+    elif ext in (".xlsx", ".xls"):
+        from connectors.excel import ExcelConnector
+        return ExcelConnector(path)
+    elif ext == ".csv":
+        from connectors.csv import CsvConnector
+        return CsvConnector(path)
     raise ValueError(
         f"Tipo de fichero no soportado todavía: {ext or '(sin extensión)'}. "
-        "Por ahora solo Access (.accdb/.mdb)."
+        "Por ahora solo Access (.accdb/.mdb), Excel (.xlsx/.xls) y CSV (.csv)."
     )
 
 
