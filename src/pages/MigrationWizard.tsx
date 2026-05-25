@@ -30,6 +30,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
   const [updateExisting, setUpdateExisting] = useState(true);
   const [externalIdPrefix, setExternalIdPrefix] = useState("cli_");
   const [logs, setLogs] = useState<string[]>([]);
+  const [batchSize, setBatchSize] = useState(100);
   const [migrationStats, setMigrationStats] = useState<{
     created: number;
     updated: number;
@@ -283,6 +284,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           update_existing: updateExisting,
           ref_prefix: "",
           external_id_prefix: externalIdPrefix,
+          batch_size: batchSize,
         },
         dry_run: isDryRun,
       });
@@ -707,6 +709,25 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   placeholder="cli_"
                   className="bg-secondary border border-border rounded px-2.5 py-1 text-white outline-none focus:border-primary/50 text-xs w-28 text-right font-mono"
                 />
+              </div>
+              <div className="h-[1px] bg-border" />
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="font-bold text-xs">Tamaño de Lote (Batch Size)</h4>
+                  <p className="text-[10px] text-muted-foreground">Cantidad de registros a importar por cada bloque.</p>
+                </div>
+                <select
+                  value={batchSize}
+                  disabled={isMigrating}
+                  onChange={(e) => setBatchSize(Number(e.target.value))}
+                  className="bg-secondary border border-border rounded px-2.5 py-1.5 text-white outline-none focus:border-primary/50 text-xs w-28 text-right font-mono"
+                >
+                  <option value={1}>1 (Uno a uno)</option>
+                  <option value={20}>20 registros</option>
+                  <option value={50}>50 registros</option>
+                  <option value={100}>100 registros</option>
+                  <option value={200}>200 registros</option>
+                </select>
               </div>
             </div>
 

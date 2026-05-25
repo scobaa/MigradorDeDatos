@@ -66,6 +66,7 @@ class MigrationOptions:
     update_existing: bool = True  # si False, los duplicados se omiten
     ref_prefix: str = ""          # prefijo para el campo ref (ej. "cli_" en FactuSOL)
     external_id_prefix: str = "cli_"
+    batch_size: int = 100
 
 
 @dataclass
@@ -215,40 +216,46 @@ class PartnerMigrator:
         dry_run: bool = False,
     ) -> MigrationStats:
         """
-        Procesa todas las filas. Si dry_run=True no escribe en Odoo.
-
-        Args:
-            rows: filas crudas del origen ({columna: valor}).
-            total: nº total de filas (para el % de progreso); 0 si desconocido.
-            dry_run: simular sin escribir.
+        Procesa todas las filas en lotes (batching) para optimizar el rendimiento.
         """
         stats = MigrationStats()
-        log.info("Iniciando migración de partners (dry_run=%s, total=%s)", dry_run, total)
+        log.info("Iniciando migración de partners en lotes (dry_run=%s, total=%s, batch_size=%s)", 
+                 dry_run, total, self.options.batch_size)
 
-        for i, row in enumerate(rows, start=1):
-            try:
-                action = self._process_row(row, dry_run)
-                setattr(stats, action, getattr(stats, action) + 1)
-                _emit_progress(
-                    {"done": i, "total": total, "action": action}
-                )
-            except Exception as e:  # noqa: BLE001 - aislamos el fallo por fila
-                log.exception("Error en fila %s", i)
-                stats.errors.append({"row": i, "error": str(e), "data": row})
-                _emit_progress(
-                    {"done": i, "total": total, "action": "error", "message": str(e)}
-                )
+        # Función auxiliar para agrupar en lotes
+        def chunked(iterable, n):
+            iterator = iter(iterable)
+            while True:
+                chunk = []
+                for _ in range(n):
+                    try:
+                        chunk.append(next(iterator))
+                    except StopIteration:
+                        break
+                if not chunk:
+                    break
+                yield chunk
+
+        batch_size = self.options.batch_size or 100
+        current_done = 0
+
+        for batch in chunked(rows, batch_size):
+            self._process_batch(batch, current_done, total, dry_run, stats)
+            current_done += len(batch)
 
         log.info("Migración terminada: %s", stats.as_dict())
         return stats
 
-    def _process_row(self, row: dict[str, Any], dry_run: bool) -> str:
-        """
-        Transforma y escribe una fila de la empresa y su contacto relacionado si existe.
-        Devuelve la acción realizada para la empresa principal:
-        'created' | 'updated' | 'skipped'.
-        """
-        # 1. Obtener mapeo inverso para los campos virtuales especiales
+    def _process_batch(
+        self,
+        batch_rows: list[dict[str, Any]],
+        start_idx: int,
+        total: int,
+        dry_run: bool,
+        stats: MigrationStats,
+    ) -> None:
+        # 1. Preparación de datos y limpieza inicial en memoria
+        records = []
         rev_mapping = {v: k for k, v in self.mapping.items()}
 
         external_id_col = rev_mapping.get("__external_id")
@@ -256,191 +263,341 @@ class PartnerMigrator:
         contact_email_col = rev_mapping.get("contact_email")
         contact_phone_col = rev_mapping.get("contact_phone")
         contact_mobile_col = rev_mapping.get("contact_mobile")
-
-        # 2. Extraer valor de ID externa si está mapeada
-        raw_ext_id = None
-        if external_id_col:
-            raw_ext_id = row.get(external_id_col)
-
-        company_xml_id = None
-        if raw_ext_id is not None:
-            # Limpiar el valor para evitar decimales si Excel lo leyó como float (ej: "15.0" -> "15")
-            cleaned_ext_id = str(raw_ext_id).strip()
-            if cleaned_ext_id.endswith(".0"):
-                cleaned_ext_id = cleaned_ext_id[:-2]
-            if cleaned_ext_id:
-                prefix = self.options.external_id_prefix or ""
-                company_xml_id = f"{prefix}{cleaned_ext_id}"
-
-        # 3. Buscar duplicado por ID externa primero
-        existing_id = None
-        if company_xml_id:
-            existing_id = self.odoo.get_xml_id_res_id(company_xml_id, PARTNER_MODEL)
-
-        # 4. Transformar los datos de la empresa principal
-        vals = transform_partner(
-            row,
-            self.mapping,
-            default_country=self.options.default_country,
-            customer_rank=self.options.customer_rank,
-            supplier_rank=self.options.supplier_rank,
-            infer_company=self.options.infer_company,
-        )
-        if self.options.ref_prefix and "ref" in vals:
-            vals["ref"] = f"{self.options.ref_prefix}{vals['ref']}"
-        self._resolve_geo(vals)
-        vals = self.odoo.filter_vals(PARTNER_MODEL, vals)
-
-        # 5. Si no se encontró por ID externa, buscar por deduplicación normal (NIF, nombre, ref)
-        if not existing_id:
-            existing_id = self.find_duplicate(vals)
-
-        # 6. Crear o actualizar la empresa
-        action = "created"
-        company_id = existing_id
-
-        if existing_id:
-            if not self.options.update_existing:
-                action = "skipped"
-            else:
-                if not dry_run:
-                    # No pisar customer/supplier_rank de un partner ya existente.
-                    update_vals = {
-                        k: v for k, v in vals.items()
-                        if k not in ("customer_rank", "supplier_rank")
-                    }
-                    self.odoo.write(PARTNER_MODEL, [existing_id], update_vals)
-                action = "updated"
-        else:
-            if not dry_run:
-                company_id = self._create_with_vat_fallback(vals)
-            action = "created"
-
-        # 7. Vincular XML ID de la empresa en ir.model.data si no existía ya
-        if not dry_run and company_xml_id and company_id:
-            self.odoo.create_or_update_xml_id(company_xml_id, PARTNER_MODEL, company_id)
-
-        # 8. Procesar contacto relacionado si está mapeado
-        if contact_name_col:
-            from transformers.partners import clean_str, clean_email, clean_phone
-            raw_contact_name = row.get(contact_name_col)
-            contact_name = clean_str(raw_contact_name)
-
-            if contact_name:
-                contact_email = clean_email(row.get(contact_email_col)) if contact_email_col else None
-                contact_phone = clean_phone(row.get(contact_phone_col), self.options.default_country) if contact_phone_col else None
-                contact_mobile = clean_phone(row.get(contact_mobile_col), self.options.default_country) if contact_mobile_col else None
-
-                contact_vals = {
-                    "name": contact_name,
-                    "is_company": False,
-                    "type": "contact",
-                }
-                if company_id:
-                    contact_vals["parent_id"] = company_id
-                if contact_email:
-                    contact_vals["email"] = contact_email
-                if contact_phone:
-                    contact_vals["phone"] = contact_phone
-                if contact_mobile:
-                    contact_vals["mobile"] = contact_mobile
-
-                contact_vals = self.odoo.filter_vals(PARTNER_MODEL, contact_vals)
-
-                # Deduplicar el contacto
-                contact_id = None
-                contact_xml_id = None
-
-                if company_xml_id:
-                    contact_xml_id = f"{company_xml_id}_contact"
-                    contact_id = self.odoo.get_xml_id_res_id(contact_xml_id, PARTNER_MODEL)
-
-                # Si no se encuentra por XML ID pero tenemos ID de empresa, buscar por nombre bajo la empresa
-                if not contact_id and company_id:
-                    domain = [
-                        ("parent_id", "=", company_id),
-                        ("name", "=", contact_name),
-                        ("is_company", "=", False),
-                    ]
-                    c_ids = self.odoo.search(PARTNER_MODEL, domain, limit=1)
-                    if c_ids:
-                        contact_id = c_ids[0]
-
-                # Crear o actualizar contacto relacionado
-                if contact_id:
-                    if self.options.update_existing and not dry_run:
-                        self.odoo.write(PARTNER_MODEL, [contact_id], contact_vals)
-                else:
-                    if not dry_run:
-                        contact_id = self.odoo.create(PARTNER_MODEL, contact_vals)
-
-                # Registrar XML ID del contacto
-                if not dry_run and contact_xml_id and contact_id:
-                    self.odoo.create_or_update_xml_id(contact_xml_id, PARTNER_MODEL, contact_id)
-
-        # 9. Procesar cuenta bancaria si está mapeada
         bank_acc_col = rev_mapping.get("bank_acc_number")
         bank_name_col = rev_mapping.get("bank_name")
 
-        if bank_acc_col:
-            raw_acc_num = row.get(bank_acc_col)
-            if raw_acc_num is not None:
-                # Limpieza básica de la cuenta bancaria (sin espacios ni guiones)
-                cleaned_acc_num = str(raw_acc_num).strip().upper()
-                cleaned_acc_num = re.sub(r"[\s\-]", "", cleaned_acc_num)
-                # Si Excel leyó como float con .0 al final
-                if cleaned_acc_num.endswith(".0"):
-                    cleaned_acc_num = cleaned_acc_num[:-2]
+        for idx_offset, row in enumerate(batch_rows):
+            row_idx = start_idx + idx_offset + 1
+            try:
+                # Transformar datos de empresa principal
+                vals = transform_partner(
+                    row,
+                    self.mapping,
+                    default_country=self.options.default_country,
+                    customer_rank=self.options.customer_rank,
+                    supplier_rank=self.options.supplier_rank,
+                    infer_company=self.options.infer_company,
+                )
+                if self.options.ref_prefix and "ref" in vals:
+                    vals["ref"] = f"{self.options.ref_prefix}{vals['ref']}"
+                self._resolve_geo(vals)
+                vals = self.odoo.filter_vals(PARTNER_MODEL, vals)
 
-                if cleaned_acc_num and company_id:
-                    bank_xml_id = None
+                # Extraer XML ID si aplica
+                company_xml_id = None
+                if external_id_col:
+                    raw_ext_id = row.get(external_id_col)
+                    if raw_ext_id is not None:
+                        cleaned_ext_id = str(raw_ext_id).strip()
+                        if cleaned_ext_id.endswith(".0"):
+                            cleaned_ext_id = cleaned_ext_id[:-2]
+                        if cleaned_ext_id:
+                            prefix = self.options.external_id_prefix or ""
+                            company_xml_id = f"{prefix}{cleaned_ext_id}"
+
+                records.append({
+                    "idx": row_idx,
+                    "row": row,
+                    "vals": vals,
+                    "company_xml_id": company_xml_id,
+                    "existing_id": None,
+                    "action": None,
+                    "company_id": None,
+                    "error_msg": None,
+                })
+            except Exception as e:
+                # Fila corrupta antes de Odoo
+                log.exception("Error de transformación en fila %s", row_idx)
+                stats.errors.append({"row": row_idx, "error": str(e), "data": row})
+                _emit_progress(
+                    {"done": row_idx, "total": total, "action": "error", "message": str(e)}
+                )
+
+        # Si no hay registros válidos que procesar en este lote, terminamos
+        if not records:
+            return
+
+        # 2. Búsqueda de duplicados en bloque (Deduplicación masiva)
+        # 2.1 Buscar por XML IDs en ir.model.data
+        xml_id_to_res_id = {}
+        company_xml_ids = [r["company_xml_id"] for r in records if r["company_xml_id"]]
+        if company_xml_ids:
+            domain_xml = [
+                ("module", "=", "__import__"),
+                ("name", "in", company_xml_ids),
+                ("model", "=", PARTNER_MODEL),
+            ]
+            try:
+                xml_recs = self.odoo.search_read("ir.model.data", domain_xml, ["name", "res_id"])
+                xml_id_to_res_id = {x["name"]: x["res_id"] for x in xml_recs}
+            except Exception as e:
+                log.warning("Fallo al buscar XML IDs en lote: %s", e)
+
+        # Asignar IDs encontrados por XML ID
+        records_to_check = []
+        for r in records:
+            xml_id = r["company_xml_id"]
+            if xml_id and xml_id in xml_id_to_res_id:
+                r["existing_id"] = xml_id_to_res_id[xml_id]
+            else:
+                records_to_check.append(r)
+
+        # 2.2 Buscar por NIF, Nombre y Ref para los registros restantes
+        if records_to_check:
+            vats = list(set([r["vals"]["vat"] for r in records_to_check if r["vals"].get("vat")]))
+            names = list(set([r["vals"]["name"] for r in records_to_check if r["vals"].get("name")]))
+            refs = list(set([r["vals"]["ref"] for r in records_to_check if r["vals"].get("ref")]))
+
+            vat_to_id = {}
+            name_to_id = {}
+            ref_to_id = {}
+
+            if vats:
+                try:
+                    res_vat = self.odoo.search_read(PARTNER_MODEL, [("vat", "in", vats)], ["id", "vat"])
+                    vat_to_id = {x["vat"]: x["id"] for x in res_vat}
+                except Exception as e:
+                    log.warning("Fallo al buscar NIFs en lote: %s", e)
+
+            if names:
+                try:
+                    res_name = self.odoo.search_read(PARTNER_MODEL, [("name", "in", names)], ["id", "name"])
+                    name_to_id = {x["name"]: x["id"] for x in res_name}
+                except Exception as e:
+                    log.warning("Fallo al buscar nombres en lote: %s", e)
+
+            if refs:
+                try:
+                    res_ref = self.odoo.search_read(PARTNER_MODEL, [("ref", "in", refs)], ["id", "ref"])
+                    ref_to_id = {x["ref"]: x["id"] for x in res_ref}
+                except Exception as e:
+                    log.warning("Fallo al buscar referencias en lote: %s", e)
+
+            # Asignar IDs basados en coincidencia normal
+            for r in records_to_check:
+                vat = r["vals"].get("vat")
+                name = r["vals"].get("name")
+                ref = r["vals"].get("ref")
+
+                if vat and vat in vat_to_id:
+                    r["existing_id"] = vat_to_id[vat]
+                elif name and name in name_to_id:
+                    r["existing_id"] = name_to_id[name]
+                elif ref and ref in ref_to_id:
+                    r["existing_id"] = ref_to_id[ref]
+
+        # 3. Separar en Actualizaciones vs Creaciones
+        updates_records = []
+        creates_records = []
+
+        for r in records:
+            if r["existing_id"]:
+                if not self.options.update_existing:
+                    r["action"] = "skipped"
+                    r["company_id"] = r["existing_id"]
+                else:
+                    updates_records.append(r)
+            else:
+                creates_records.append(r)
+
+        # 4. Procesar Actualizaciones (uno a uno ya que Odoo write no permite bulk heterogéneo)
+        for r in updates_records:
+            r["company_id"] = r["existing_id"]
+            r["action"] = "updated"
+            if not dry_run:
+                try:
+                    update_vals = {
+                        k: v for k, v in r["vals"].items()
+                        if k not in ("customer_rank", "supplier_rank")
+                    }
+                    self.odoo.write(PARTNER_MODEL, [r["existing_id"]], update_vals)
+                except Exception as e:
+                    log.exception("Error al actualizar fila %s", r["idx"])
+                    r["action"] = "error"
+                    r["error_msg"] = str(e)
+
+        # 5. Procesar Creaciones
+        if creates_records:
+            if dry_run:
+                for r in creates_records:
+                    r["action"] = "created"
+            else:
+                # Creación masiva en un solo RPC call (Bulk Create)
+                vals_list = [r["vals"] for r in creates_records]
+                try:
+                    log.info("Creando lote de %s partners en Odoo", len(vals_list))
+                    created_ids = self.odoo.execute(PARTNER_MODEL, "create", vals_list)
+                    # Si Odoo devuelve un solo ID en versiones viejas (aunque le pasamos lista), o lista de IDs
+                    if isinstance(created_ids, int):
+                        created_ids = [created_ids]
+                    
+                    for r, cid in zip(creates_records, created_ids):
+                        r["company_id"] = cid
+                        r["action"] = "created"
+                except Exception as bulk_err:
+                    log.warning("Fallo en creación masiva (haciendo fallback fila a fila): %s", bulk_err)
+                    # Fallback fila a fila para aislar fallos
+                    for r in creates_records:
+                        try:
+                            cid = self._create_with_vat_fallback(r["vals"])
+                            r["company_id"] = cid
+                            r["action"] = "created"
+                        except Exception as row_err:
+                            log.exception("Error al crear fila %s en el fallback", r["idx"])
+                            r["action"] = "error"
+                            r["error_msg"] = str(row_err)
+
+        # 6. Vincular XML IDs, Contactos Relacionados y Cuentas Bancarias de forma individual
+        for r in records:
+            if r["action"] == "error":
+                continue
+
+            company_id = r["company_id"]
+            company_xml_id = r["company_xml_id"]
+            row = r["row"]
+
+            # 6.1 Vincular XML ID de la empresa principal
+            if not dry_run and company_xml_id and company_id and r["action"] == "created":
+                try:
+                    self.odoo.create_or_update_xml_id(company_xml_id, PARTNER_MODEL, company_id)
+                except Exception as e:
+                    log.warning("No se pudo asociar XML ID para la empresa %s: %s", company_xml_id, e)
+
+            # 6.2 Procesar contacto relacionado si está mapeado
+            if contact_name_col and company_id:
+                from transformers.partners import clean_str, clean_email, clean_phone
+                raw_contact_name = row.get(contact_name_col)
+                contact_name = clean_str(raw_contact_name)
+
+                if contact_name:
+                    contact_email = clean_email(row.get(contact_email_col)) if contact_email_col else None
+                    contact_phone = clean_phone(row.get(contact_phone_col), self.options.default_country) if contact_phone_col else None
+                    contact_mobile = clean_phone(row.get(contact_mobile_col), self.options.default_country) if contact_mobile_col else None
+
+                    contact_vals = {
+                        "name": contact_name,
+                        "is_company": False,
+                        "type": "contact",
+                        "parent_id": company_id,
+                    }
+                    if contact_email:
+                        contact_vals["email"] = contact_email
+                    if contact_phone:
+                        contact_vals["phone"] = contact_phone
+                    if contact_mobile:
+                        contact_vals["mobile"] = contact_mobile
+
+                    contact_vals = self.odoo.filter_vals(PARTNER_MODEL, contact_vals)
+
+                    contact_id = None
+                    contact_xml_id = None
+
                     if company_xml_id:
-                        bank_xml_id = f"{company_xml_id}_bank"
+                        contact_xml_id = f"{company_xml_id}_contact"
+                        try:
+                            contact_id = self.odoo.get_xml_id_res_id(contact_xml_id, PARTNER_MODEL)
+                        except Exception:
+                            pass
 
-                    # 1. Buscar si la cuenta ya existe
-                    bank_acc_id = None
-                    if bank_xml_id:
-                        bank_acc_id = self.odoo.get_xml_id_res_id(bank_xml_id, "res.partner.bank")
+                    if not contact_id:
+                        try:
+                            domain_c = [
+                                ("parent_id", "=", company_id),
+                                ("name", "=", contact_name),
+                                ("is_company", "=", False),
+                            ]
+                            c_ids = self.odoo.search(PARTNER_MODEL, domain_c, limit=1)
+                            if c_ids:
+                                contact_id = c_ids[0]
+                        except Exception:
+                            pass
 
-                    if not bank_acc_id:
-                        # Buscar por número de cuenta exacto bajo el mismo partner
-                        domain = [
-                            ("partner_id", "=", company_id),
-                            ("acc_number", "=", cleaned_acc_num)
-                        ]
-                        b_ids = self.odoo.search("res.partner.bank", domain, limit=1)
-                        if b_ids:
-                            bank_acc_id = b_ids[0]
+                    # Crear o actualizar contacto
+                    if not dry_run:
+                        try:
+                            if contact_id:
+                                if self.options.update_existing:
+                                    self.odoo.write(PARTNER_MODEL, [contact_id], contact_vals)
+                            else:
+                                contact_id = self.odoo.create(PARTNER_MODEL, contact_vals)
 
-                    # 2. Crear o actualizar cuenta bancaria
-                    if not bank_acc_id:
-                        # Resolver banco id si existe bank_name
-                        bank_id = None
-                        if bank_name_col:
-                            raw_bank_name = row.get(bank_name_col)
-                            if raw_bank_name:
-                                bank_id = self.odoo.get_or_create_bank(str(raw_bank_name))
+                            if contact_xml_id and contact_id:
+                                self.odoo.create_or_update_xml_id(contact_xml_id, PARTNER_MODEL, contact_id)
+                        except Exception as e:
+                            log.warning("No se pudo procesar el contacto para fila %s: %s", r["idx"], e)
 
-                        bank_vals = {
-                            "acc_number": cleaned_acc_num,
-                            "partner_id": company_id,
-                        }
-                        if bank_id:
-                            bank_vals["bank_id"] = bank_id
+            # 6.3 Procesar cuenta bancaria si está mapeada
+            if bank_acc_col and company_id:
+                raw_acc_num = row.get(bank_acc_col)
+                if raw_acc_num is not None:
+                    cleaned_acc_num = str(raw_acc_num).strip().upper()
+                    cleaned_acc_num = re.sub(r"[\s\-]", "", cleaned_acc_num)
+                    if cleaned_acc_num.endswith(".0"):
+                        cleaned_acc_num = cleaned_acc_num[:-2]
 
-                        if not dry_run:
+                    if cleaned_acc_num:
+                        bank_xml_id = None
+                        if company_xml_id:
+                            bank_xml_id = f"{company_xml_id}_bank"
+
+                        bank_acc_id = None
+                        if bank_xml_id:
                             try:
-                                log.info("Creando cuenta bancaria para partner_id=%s: %s", company_id, cleaned_acc_num)
+                                bank_acc_id = self.odoo.get_xml_id_res_id(bank_xml_id, "res.partner.bank")
+                            except Exception:
+                                pass
+
+                        if not bank_acc_id:
+                            try:
+                                domain_b = [
+                                    ("partner_id", "=", company_id),
+                                    ("acc_number", "=", cleaned_acc_num)
+                                ]
+                                b_ids = self.odoo.search("res.partner.bank", domain_b, limit=1)
+                                if b_ids:
+                                    bank_acc_id = b_ids[0]
+                            except Exception:
+                                pass
+
+                        # Crear o actualizar banco
+                        if not bank_acc_id and not dry_run:
+                            bank_id = None
+                            if bank_name_col:
+                                raw_bank_name = row.get(bank_name_col)
+                                if raw_bank_name:
+                                    bank_id = self.odoo.get_or_create_bank(str(raw_bank_name))
+
+                            bank_vals = {
+                                "acc_number": cleaned_acc_num,
+                                "partner_id": company_id,
+                            }
+                            if bank_id:
+                                bank_vals["bank_id"] = bank_id
+
+                            try:
                                 bank_acc_id = self.odoo.create("res.partner.bank", bank_vals)
+                                if bank_xml_id and bank_acc_id:
+                                    self.odoo.create_or_update_xml_id(bank_xml_id, "res.partner.bank", bank_acc_id)
                             except Exception as e:
-                                # Capturar fallos (ej. validación estricta de IBAN en Odoo) y no interrumpir
                                 log.warning("No se pudo crear la cuenta bancaria %r: %s", cleaned_acc_num, e)
 
-                    # Vincular XML ID del banco
-                    if not dry_run and bank_xml_id and bank_acc_id:
-                        self.odoo.create_or_update_xml_id(bank_xml_id, "res.partner.bank", bank_acc_id)
+        # 7. Registrar estadísticas finales y emitir progreso
+        for r in records:
+            row_idx = r["idx"]
+            action = r["action"]
+            error_msg = r["error_msg"]
+            row = r["row"]
 
-        return action
+            if action == "error":
+                stats.errors.append({"row": row_idx, "error": error_msg, "data": row})
+                _emit_progress(
+                    {"done": row_idx, "total": total, "action": "error", "message": error_msg}
+                )
+            else:
+                setattr(stats, action, getattr(stats, action) + 1)
+                _emit_progress(
+                    {"done": row_idx, "total": total, "action": action}
+                )
 
     def _create_with_vat_fallback(self, vals: dict[str, Any]) -> int:
         """

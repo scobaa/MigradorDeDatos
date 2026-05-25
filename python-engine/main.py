@@ -209,6 +209,8 @@ def handle_run_migration(args: dict) -> None:
         infer_company=opts.get("infer_company", True),
         update_existing=opts.get("update_existing", True),
         ref_prefix=opts.get("ref_prefix", ""),
+        external_id_prefix=opts.get("external_id_prefix", "cli_"),
+        batch_size=int(opts.get("batch_size", 100)),
     )
 
     limit: int | None = int(args["limit"]) if args.get("limit") else None
