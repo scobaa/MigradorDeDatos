@@ -100,7 +100,30 @@ export async function callPython<T = any>(
         };
       }
     }
-    
+
+    if (command === "get_odoo_fields") {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return {
+        status: "ok",
+        data: {
+          fields: [
+            { name: "ref", label: "Referencia Externa (ref)", required: false, type: "char" },
+            { name: "name", label: "Nombre/Razón Social (name)", required: true, type: "char" },
+            { name: "vat", label: "NIF/CIF (vat)", required: false, type: "char" },
+            { name: "email", label: "Correo Electrónico (email)", required: false, type: "char" },
+            { name: "phone", label: "Teléfono Fijo (phone)", required: false, type: "char" },
+            { name: "mobile", label: "Teléfono Móvil (mobile)", required: false, type: "char" },
+            { name: "street", label: "Calle (street)", required: false, type: "char" },
+            { name: "zip", label: "Código Postal (zip)", required: false, type: "char" },
+            { name: "city", label: "Ciudad (city)", required: false, type: "char" },
+            { name: "website", label: "Sitio Web (website)", required: false, type: "char" },
+            { name: "comment", label: "Notas (comment)", required: false, type: "text" },
+            { name: "property_payment_term_id", label: "Plazo de Pago (property_payment_term_id)", required: false, type: "many2one" },
+          ]
+        } as any
+      };
+    }
+
     return {
       status: "error",
       error: "El puente de Tauri no está disponible en un navegador web convencional.",

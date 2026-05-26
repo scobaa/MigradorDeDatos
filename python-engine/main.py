@@ -72,6 +72,8 @@ def main() -> None:
             handle_preview_migration(args)
         elif command == "run_migration":
             handle_run_migration(args)
+        elif command == "get_odoo_fields":
+            handle_get_odoo_fields(args)
         else:
             respond("error", error=f"Comando desconocido: {command}")
 
@@ -233,6 +235,43 @@ def handle_run_migration(args: dict) -> None:
         )
 
     respond("ok", data={"dry_run": dry_run, "stats": stats.as_dict()})
+
+
+def handle_get_odoo_fields(args: dict) -> None:
+    from migrator.odoo_client import OdooClient, OdooConfig
+
+    odoo_args = args["odoo"]
+    model = args.get("model", "res.partner")
+
+    odoo = OdooClient(
+        OdooConfig(
+            url=odoo_args["url"],
+            db=odoo_args["db"],
+            username=odoo_args["username"],
+            password=odoo_args["password"],
+        )
+    )
+    odoo.connect()
+
+    # Obtener metadatos de los campos usando fields_get
+    fields_info = odoo.execute(model, "fields_get", [], ["string", "type", "readonly"])
+
+    result_fields = []
+    for fname, info in fields_info.items():
+        # Descartar campos que sean readonly (no almacenables directamente)
+        if info.get("readonly", False):
+            continue
+
+        result_fields.append({
+            "name": fname,
+            "label": f"{info.get('string', fname)} ({fname})",
+            "required": info.get("required", False),
+            "type": info.get("type", "char"),
+        })
+
+    # Ordenar por nombre del campo para comodidad
+    result_fields.sort(key=lambda x: x["name"])
+    respond("ok", data={"fields": result_fields})
 
 
 if __name__ == "__main__":

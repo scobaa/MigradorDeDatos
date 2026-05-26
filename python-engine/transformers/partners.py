@@ -191,8 +191,17 @@ def transform_partner(
     vals: dict[str, Any] = {}
 
     for source_col, odoo_field in mapping.items():
-        if odoo_field not in SUPPORTED_FIELDS:
-            log.debug("Campo destino no soportado, ignorado: %s", odoo_field)
+        if not odoo_field:
+            continue
+        if odoo_field in (
+            "__external_id",
+            "contact_name",
+            "contact_email",
+            "contact_phone",
+            "contact_mobile",
+            "bank_acc_number",
+            "bank_name",
+        ):
             continue
         raw = row.get(source_col)
 

@@ -38,6 +38,15 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     error_count: number;
     errors: any[];
   } | null>(null);
+  const [migrationProgress, setMigrationProgress] = useState<{ done: number; total: number } | null>(null);
+
+  useEffect(() => {
+    if (selectedModel === "res.partner") {
+      setExternalIdPrefix("cli_");
+    } else if (selectedModel === "res.partner.supplier") {
+      setExternalIdPrefix("pro_");
+    }
+  }, [selectedModel]);
 
   useEffect(() => {
     // Cargar información del cliente
@@ -71,7 +80,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     }
   }, [logs]);
 
-  const odooFields = [
+  const [odooFields, setOdooFields] = useState<any[]>([
     { name: "__external_id", label: "ID Externo (XML ID)", required: false },
     { name: "ref", label: "Referencia Externa (ref)", required: false },
     { name: "name", label: "Nombre/Razón Social (name)", required: true },
@@ -82,13 +91,92 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     { name: "street", label: "Calle (street)", required: false },
     { name: "zip", label: "Código Postal (zip)", required: false },
     { name: "city", label: "Ciudad (city)", required: false },
+    { name: "_country", label: "País (country_id)", required: false },
+    { name: "_state", label: "Provincia/Estado (state_id)", required: false },
     { name: "contact_name", label: "Contacto: Nombre", required: false },
     { name: "contact_email", label: "Contacto: Email", required: false },
     { name: "contact_phone", label: "Contacto: Teléfono", required: false },
     { name: "contact_mobile", label: "Contacto: Móvil", required: false },
     { name: "bank_acc_number", label: "Banco: Número de Cuenta (IBAN)", required: false },
     { name: "bank_name", label: "Banco: Nombre de la Entidad", required: false },
-  ];
+  ]);
+
+  useEffect(() => {
+    if (!client) return;
+
+    const fetchOdooFields = async () => {
+      try {
+        const response = await callPython("get_odoo_fields", {
+          odoo: {
+            url: client.odoo_url,
+            db: client.odoo_db,
+            username: client.odoo_user,
+            password: client.odoo_password,
+          },
+          model: selectedModel.startsWith("res.partner") ? "res.partner" : selectedModel,
+        });
+
+        if (response.status === "ok" && response.data?.fields) {
+          const fetchedFields: any[] = response.data.fields;
+
+          // Campos virtuales especiales
+          const virtualFields = [
+            { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+            { name: "_country", label: "País (country_id)", required: false },
+            { name: "_state", label: "Provincia/Estado (state_id)", required: false },
+            { name: "contact_name", label: "Contacto: Nombre", required: false },
+            { name: "contact_email", label: "Contacto: Email", required: false },
+            { name: "contact_phone", label: "Contacto: Teléfono", required: false },
+            { name: "contact_mobile", label: "Contacto: Móvil", required: false },
+            { name: "bank_acc_number", label: "Banco: Número de Cuenta (IBAN)", required: false },
+            { name: "bank_name", label: "Banco: Nombre de la Entidad", required: false },
+          ];
+
+          const combinedFields = [...virtualFields];
+          const virtualNames = new Set(virtualFields.map(f => f.name));
+          const ignoreNames = new Set(["country_id", "state_id"]);
+
+          fetchedFields.forEach(f => {
+            if (!virtualNames.has(f.name) && !ignoreNames.has(f.name)) {
+              combinedFields.push({
+                name: f.name,
+                label: `${f.label.split(" (")[0]} (${f.name})`,
+                required: f.required,
+              });
+            }
+          });
+
+          // Ordenar los campos para comodidad del usuario
+          const mainFieldNames = ["__external_id", "name", "vat", "ref", "email", "phone", "mobile", "street", "zip", "city", "_country", "_state"];
+          const contactBankNames = ["contact_name", "contact_email", "contact_phone", "contact_mobile", "bank_acc_number", "bank_name"];
+
+          const sorted = combinedFields.sort((a, b) => {
+            const aMainIdx = mainFieldNames.indexOf(a.name);
+            const bMainIdx = mainFieldNames.indexOf(b.name);
+
+            if (aMainIdx !== -1 && bMainIdx !== -1) return aMainIdx - bMainIdx;
+            if (aMainIdx !== -1) return -1;
+            if (bMainIdx !== -1) return 1;
+
+            const aCBIdx = contactBankNames.indexOf(a.name);
+            const bCBIdx = contactBankNames.indexOf(b.name);
+
+            if (aCBIdx !== -1 && bCBIdx !== -1) return aCBIdx - bCBIdx;
+            if (aCBIdx !== -1) return -1;
+            if (bCBIdx !== -1) return 1;
+
+            return a.label.localeCompare(b.label);
+          });
+
+          setOdooFields(sorted);
+        }
+      } catch (err) {
+        console.error("Error al obtener campos de Odoo:", err);
+      }
+    };
+
+    fetchOdooFields();
+  }, [client, selectedModel]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -164,7 +252,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         const initialMappings: Record<string, string> = {};
         columns.forEach((col: string) => {
           const lowerCol = col.toLowerCase();
-          if (lowerCol === "codcli" || lowerCol === "cod" || lowerCol === "código" || lowerCol === "id_cliente" || lowerCol === "id") {
+          if (lowerCol === "codcli" || lowerCol === "codpro" || lowerCol === "cod" || lowerCol === "código" || lowerCol === "id_cliente" || lowerCol === "id") {
             initialMappings[col] = "__external_id";
           } else if (lowerCol.includes("código") || lowerCol.includes("ref") || lowerCol.includes("referencia")) {
             initialMappings[col] = "ref";
@@ -174,7 +262,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
             initialMappings[col] = "vat";
           } else if (lowerCol.includes("mail") || lowerCol.includes("email") || lowerCol.includes("correo")) {
             initialMappings[col] = "email";
-          } else if (lowerCol.includes("contacto") || lowerCol.includes("persona") || lowerCol.includes("representante") || lowerCol.includes("pcocli")) {
+          } else if (lowerCol.includes("contacto") || lowerCol.includes("persona") || lowerCol.includes("representante") || lowerCol.includes("pcocli") || lowerCol.includes("pcopro")) {
             initialMappings[col] = "contact_name";
           } else if (lowerCol.includes("móvil") || lowerCol.includes("mobile") || lowerCol.includes("celular")) {
             initialMappings[col] = "mobile";
@@ -186,9 +274,9 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
             initialMappings[col] = "zip";
           } else if (lowerCol.includes("ciudad") || lowerCol.includes("población") || lowerCol.includes("city") || lowerCol.includes("municipio")) {
             initialMappings[col] = "city";
-          } else if (lowerCol.includes("iban") || lowerCol.includes("swfcli") || lowerCol.includes("cuenta") || lowerCol.includes("cuecli")) {
+          } else if (lowerCol.includes("iban") || lowerCol.includes("swfcli") || lowerCol.includes("swfpro") || lowerCol.includes("cuenta") || lowerCol.includes("cuecli") || lowerCol.includes("cuepro")) {
             initialMappings[col] = "bank_acc_number";
-          } else if (lowerCol.includes("banco") || lowerCol.includes("bancli") || lowerCol.includes("entidad")) {
+          } else if (lowerCol.includes("banco") || lowerCol.includes("bancli") || lowerCol.includes("banpro") || lowerCol.includes("entidad")) {
             initialMappings[col] = "bank_name";
           } else {
             initialMappings[col] = "";
@@ -222,19 +310,9 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
 
     setIsMigrating(true);
     setProgress(0);
+    setMigrationProgress(null);
     setLogs([]);
     setMigrationStats(null);
-
-    // Animación visual del progreso (se detiene en 90% esperando la respuesta de Odoo)
-    const intervalId = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 90) {
-          clearInterval(intervalId);
-          return 90;
-        }
-        return prev + Math.floor(Math.random() * 8) + 2;
-      });
-    }, 250);
 
     const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
     let logIntervalId: any = null;
@@ -247,7 +325,34 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           if (res.ok) {
             const data = await res.json();
             if (data && data.logs) {
-              setLogs(data.logs);
+              const rawLogs: string[] = data.logs;
+              const displayLogs: string[] = [];
+              let lastProgress: { done: number; total: number } | null = null;
+
+              for (const line of rawLogs) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                  try {
+                    const parsed = JSON.parse(trimmed);
+                    if (parsed && parsed.event === "progress") {
+                      if (parsed.total > 0) {
+                        lastProgress = { done: parsed.done, total: parsed.total };
+                      }
+                      continue; // Omitir esta línea JSON de la consola de logs
+                    }
+                  } catch {
+                    // No es JSON, conservar
+                  }
+                }
+                displayLogs.push(line);
+              }
+
+              setLogs(displayLogs);
+              if (lastProgress) {
+                setMigrationProgress(lastProgress);
+                const pct = Math.round((lastProgress.done / lastProgress.total) * 100);
+                setProgress(Math.min(pct, 99));
+              }
             }
           }
         } catch (err) {
@@ -257,9 +362,18 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     } else {
       try {
         const { listenToPythonEvents } = await import("../lib/python");
-        unlisten = await listenToPythonEvents((line) => {
-          setLogs((prev) => [...prev, line.trim()]);
-        });
+        unlisten = await listenToPythonEvents(
+          (line) => {
+            setLogs((prev) => [...prev, line.trim()]);
+          },
+          (progressPayload: any) => {
+            if (progressPayload.total > 0) {
+              setMigrationProgress({ done: progressPayload.done, total: progressPayload.total });
+              const pct = Math.round((progressPayload.done / progressPayload.total) * 100);
+              setProgress(Math.min(pct, 99));
+            }
+          }
+        );
       } catch (err) {
         console.error("Error setting up Tauri log listener:", err);
       }
@@ -289,7 +403,6 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         dry_run: isDryRun,
       });
 
-      clearInterval(intervalId);
       if (logIntervalId) clearInterval(logIntervalId);
       if (unlisten) unlisten();
 
@@ -311,7 +424,6 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         setProgress(0);
       }
     } catch (e: any) {
-      clearInterval(intervalId);
       if (logIntervalId) clearInterval(logIntervalId);
       if (unlisten) unlisten();
       alert("Error de red o comunicación: " + e.toString());
@@ -401,9 +513,28 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   <Database className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-sm text-white">Clientes y Proveedores</h4>
+                  <h4 className="font-bold text-sm text-white">Clientes (res.partner)</h4>
                   <p className="text-[11px] text-muted-foreground mt-1">
-                    Capa `res.partner`. Deduplicación por NIF/CIF o nombre. Limpieza y formateo automático de teléfonos y correos.
+                    Capa `res.partner` (customer). Importa la tabla de clientes (F_CLI) con `customer_rank = 1` y deduplicación inteligente.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedModel("res.partner.supplier")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "res.partner.supplier"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Proveedores (res.partner)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `res.partner` (supplier). Importa la tabla de proveedores (F_PRO) con `supplier_rank = 1` y deduplicación inteligente.
                   </p>
                 </div>
               </div>
@@ -575,7 +706,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                 <p className="text-xs text-muted-foreground">Carga un archivo y selecciona una tabla para ver las columnas.</p>
               </div>
             ) : (
-              <div className="max-h-[250px] overflow-y-auto border border-border rounded-xl">
+              <div className="max-h-[550px] overflow-y-auto border border-border rounded-xl">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-secondary/40 border-b border-border">
@@ -627,7 +758,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                 <p className="text-xs text-muted-foreground">No hay registros de muestra disponibles.</p>
               </div>
             ) : (
-              <div className="max-h-[250px] overflow-x-auto border border-border rounded-xl">
+              <div className="max-h-[450px] overflow-auto border border-border rounded-xl">
                 <table className="w-full text-left border-collapse text-xs min-w-[700px]">
                   <thead>
                     <tr className="bg-secondary/40 border-b border-border">
@@ -735,7 +866,11 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
             {isMigrating && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-semibold">
-                  <span className="text-muted-foreground">Migrando registros...</span>
+                  <span className="text-muted-foreground">
+                    {migrationProgress 
+                      ? `Migrando registros (${migrationProgress.done} de ${migrationProgress.total})...` 
+                      : "Migrando registros..."}
+                  </span>
                   <span className="text-primary">{progress}%</span>
                 </div>
                 <div className="w-full bg-secondary h-2.5 rounded-full overflow-hidden">
@@ -849,6 +984,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   setStep(1);
                   setFileName(null);
                   setProgress(0);
+                  setMigrationProgress(null);
                   setTables([]);
                   setSelectedTable("");
                   setSourceColumns([]);
