@@ -1,0 +1,97 @@
+"""
+Transformador de sale.order (Pedidos de Venta).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from transformers.invoices import clean_str, clean_float, clean_date, parse_factusol_invoice_code
+
+
+def transform_sales_line(line_row: dict[str, Any]) -> dict[str, Any]:
+    """
+    Detecta y normaliza heurísticamente los campos de una línea de pedido.
+    """
+    product_code = None
+    description = "Línea de pedido"
+    quantity = 1.0
+    price_unit = 0.0
+    tax_value = None
+
+    for k, v in line_row.items():
+        kl = k.lower()
+        if kl in ("artlpe", "artlfa", "articulo", "product", "sku", "code", "referencia", "ref"):
+            product_code = clean_str(v)
+            if product_code and product_code.endswith(".0"):
+                product_code = product_code[:-2]
+        elif kl in ("deslpe", "deslfa", "descripcion", "description", "name", "nombre"):
+            description = clean_str(v) or description
+        elif kl in ("canlpe", "canlfa", "cantidad", "quantity", "qty", "unidades"):
+            quantity = clean_float(v)
+        elif kl in ("prelpe", "prelfa", "precio", "price", "price_unit", "importe"):
+            price_unit = clean_float(v)
+        elif kl in ("ivalpe", "ivalfa", "iva", "tax", "pct", "porcentaje"):
+            tax_value = clean_str(v)
+            if tax_value and tax_value.endswith(".0"):
+                tax_value = tax_value[:-2]
+
+    return {
+        "product_code": product_code,
+        "name": description,
+        "quantity": quantity,
+        "price_unit": price_unit,
+        "tax_value": tax_value,
+    }
+
+
+def transform_sales_order(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+) -> dict[str, Any]:
+    """
+    Transforma la cabecera y las líneas de un pedido al esquema de Odoo.
+    """
+    vals: dict[str, Any] = {}
+
+    # 1. Procesar campos de la cabecera mapeados
+    for source_col, odoo_field in mapping.items():
+        if not odoo_field:
+            continue
+        raw = row.get(source_col)
+        if raw is None:
+            continue
+
+        if odoo_field == "date_order":
+            date_clean = clean_date(raw)
+            if date_clean:
+                vals[odoo_field] = f"{date_clean} 12:00:00"
+        elif odoo_field == "_partner_code":
+            partner_code = clean_str(raw)
+            if partner_code and partner_code.endswith(".0"):
+                partner_code = partner_code[:-2]
+            vals[odoo_field] = partner_code
+        else:
+            cleaned = clean_str(raw)
+            if cleaned is not None:
+                vals[odoo_field] = cleaned
+
+    if not vals.get("name"):
+        vals["name"] = "/"
+    else:
+        # Formatear el nombre con el año, serie y número
+        # Formato: SO/YEAR/SERIES/NUMBER
+        year = "2026"
+        if vals.get("date_order"):
+            year = vals["date_order"][:4]
+            
+        series, number = parse_factusol_invoice_code(vals["name"])
+        vals["name"] = f"SO/{year}/{series}/{number}"
+
+    # 2. Procesar líneas virtuales (_lines)
+    raw_lines = row.get("_lines") or []
+    transformed_lines = []
+    for line in raw_lines:
+        transformed_lines.append(transform_sales_line(line))
+
+    vals["_lines"] = transformed_lines
+    return vals

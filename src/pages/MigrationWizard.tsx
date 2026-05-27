@@ -29,8 +29,12 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
   const [client, setClient] = useState<DBClient | null>(null);
   const [updateExisting, setUpdateExisting] = useState(true);
   const [externalIdPrefix, setExternalIdPrefix] = useState("cli_");
+  const [externalIdColumn, setExternalIdColumn] = useState<string>("");
+  const [categoriesTable, setCategoriesTable] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(100);
+  const [confirmOrders, setConfirmOrders] = useState(true);
+  const [postEntries, setPostEntries] = useState(true);
   const [migrationStats, setMigrationStats] = useState<{
     created: number;
     updated: number;
@@ -45,6 +49,16 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
       setExternalIdPrefix("cli_");
     } else if (selectedModel === "res.partner.supplier") {
       setExternalIdPrefix("pro_");
+    } else if (selectedModel === "product.template") {
+      setExternalIdPrefix("art_");
+    } else if (selectedModel === "account.move") {
+      setExternalIdPrefix("inv_out_");
+    } else if (selectedModel === "account.move.supplier") {
+      setExternalIdPrefix("inv_in_");
+    } else if (selectedModel === "sale.order") {
+      setExternalIdPrefix("so_");
+    } else if (selectedModel === "account.move.entry") {
+      setExternalIdPrefix("asi_");
     }
   }, [selectedModel]);
 
@@ -113,24 +127,45 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
             username: client.odoo_user,
             password: client.odoo_password,
           },
-          model: selectedModel.startsWith("res.partner") ? "res.partner" : selectedModel,
+          model: selectedModel.startsWith("res.partner") ? "res.partner" : (selectedModel.startsWith("account.move") ? "account.move" : selectedModel),
         });
 
         if (response.status === "ok" && response.data?.fields) {
           const fetchedFields: any[] = response.data.fields;
 
           // Campos virtuales especiales
-          const virtualFields = [
+          let virtualFields = [
             { name: "__external_id", label: "ID Externo (XML ID)", required: false },
-            { name: "_country", label: "País (country_id)", required: false },
-            { name: "_state", label: "Provincia/Estado (state_id)", required: false },
-            { name: "contact_name", label: "Contacto: Nombre", required: false },
-            { name: "contact_email", label: "Contacto: Email", required: false },
-            { name: "contact_phone", label: "Contacto: Teléfono", required: false },
-            { name: "contact_mobile", label: "Contacto: Móvil", required: false },
-            { name: "bank_acc_number", label: "Banco: Número de Cuenta (IBAN)", required: false },
-            { name: "bank_name", label: "Banco: Nombre de la Entidad", required: false },
           ];
+          if (selectedModel.startsWith("res.partner")) {
+            virtualFields = [
+              ...virtualFields,
+              { name: "_country", label: "País (country_id)", required: false },
+              { name: "_state", label: "Provincia/Estado (state_id)", required: false },
+              { name: "contact_name", label: "Contacto: Nombre", required: false },
+              { name: "contact_email", label: "Contacto: Email", required: false },
+              { name: "contact_phone", label: "Contacto: Teléfono", required: false },
+              { name: "contact_mobile", label: "Contacto: Móvil", required: false },
+              { name: "bank_acc_number", label: "Banco: Número de Cuenta (IBAN)", required: false },
+              { name: "bank_name", label: "Banco: Nombre de la Entidad", required: false },
+            ];
+          } else if (selectedModel === "account.move.entry") {
+            virtualFields = [
+              ...virtualFields,
+              { name: "line_ids/account_id", label: "Cuenta Contable Apunte (CUEAPU) *", required: true },
+              { name: "line_ids/name", label: "Concepto/Glosa Apunte (CONAPU) *", required: true },
+              { name: "line_ids/debit", label: "Debe (Importe)", required: false },
+              { name: "line_ids/credit", label: "Haber (Importe)", required: false },
+              { name: "_line_amount", label: "Importe Único (Debe/Haber)", required: false },
+              { name: "_line_side", label: "Indicador Lado (D/H)", required: false },
+              { name: "line_ids/partner_id", label: "Partner en Apunte (Opcional)", required: false },
+            ];
+          } else if (selectedModel.startsWith("account.move") || selectedModel === "sale.order") {
+            virtualFields = [
+              ...virtualFields,
+              { name: "_partner_code", label: "Código Cliente/Proveedor (_partner_code)", required: true },
+            ];
+          }
 
           const combinedFields = [...virtualFields];
           const virtualNames = new Set(virtualFields.map(f => f.name));
@@ -138,6 +173,12 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
 
           fetchedFields.forEach(f => {
             if (!virtualNames.has(f.name) && !ignoreNames.has(f.name)) {
+              if (selectedModel === "account.move.entry") {
+                // Para asientos contables, solo mostramos campos de cabecera específicos
+                if (!["name", "date", "ref", "journal_id"].includes(f.name)) {
+                  return;
+                }
+              }
               combinedFields.push({
                 name: f.name,
                 label: `${f.label.split(" (")[0]} (${f.name})`,
@@ -250,38 +291,168 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         
         // Mapeo inicial inteligente (Fuzzy Match básico)
         const initialMappings: Record<string, string> = {};
-        columns.forEach((col: string) => {
-          const lowerCol = col.toLowerCase();
-          if (lowerCol === "codcli" || lowerCol === "codpro" || lowerCol === "cod" || lowerCol === "código" || lowerCol === "id_cliente" || lowerCol === "id") {
-            initialMappings[col] = "__external_id";
-          } else if (lowerCol.includes("código") || lowerCol.includes("ref") || lowerCol.includes("referencia")) {
-            initialMappings[col] = "ref";
-          } else if (lowerCol.includes("nombre") || lowerCol.includes("razón") || lowerCol.includes("name") || lowerCol.includes("social")) {
-            initialMappings[col] = "name";
-          } else if (lowerCol.includes("cif") || lowerCol.includes("nif") || lowerCol.includes("vat") || lowerCol.includes("documento")) {
-            initialMappings[col] = "vat";
-          } else if (lowerCol.includes("mail") || lowerCol.includes("email") || lowerCol.includes("correo")) {
-            initialMappings[col] = "email";
-          } else if (lowerCol.includes("contacto") || lowerCol.includes("persona") || lowerCol.includes("representante") || lowerCol.includes("pcocli") || lowerCol.includes("pcopro")) {
-            initialMappings[col] = "contact_name";
-          } else if (lowerCol.includes("móvil") || lowerCol.includes("mobile") || lowerCol.includes("celular")) {
-            initialMappings[col] = "mobile";
-          } else if (lowerCol.includes("teléfono") || lowerCol.includes("phone")) {
-            initialMappings[col] = "phone";
-          } else if (lowerCol.includes("calle") || lowerCol.includes("dirección") || lowerCol.includes("street")) {
-            initialMappings[col] = "street";
-          } else if (lowerCol.includes("cp") || lowerCol.includes("postal") || lowerCol.includes("zip") || lowerCol.includes("c.postal")) {
-            initialMappings[col] = "zip";
-          } else if (lowerCol.includes("ciudad") || lowerCol.includes("población") || lowerCol.includes("city") || lowerCol.includes("municipio")) {
-            initialMappings[col] = "city";
-          } else if (lowerCol.includes("iban") || lowerCol.includes("swfcli") || lowerCol.includes("swfpro") || lowerCol.includes("cuenta") || lowerCol.includes("cuecli") || lowerCol.includes("cuepro")) {
-            initialMappings[col] = "bank_acc_number";
-          } else if (lowerCol.includes("banco") || lowerCol.includes("bancli") || lowerCol.includes("banpro") || lowerCol.includes("entidad")) {
-            initialMappings[col] = "bank_name";
-          } else {
-            initialMappings[col] = "";
-          }
+        if (selectedModel === "product.template") {
+          columns.forEach((col: string) => {
+            const lowerCol = col.toLowerCase();
+            if (lowerCol === "codart" || lowerCol === "código" || lowerCol === "cod" || lowerCol === "id" || lowerCol === "referencia" || lowerCol === "ref" || lowerCol === "default_code") {
+              initialMappings[col] = "default_code";
+            } else if (lowerCol === "eanart" || lowerCol === "codbar" || lowerCol === "barcode" || lowerCol.includes("ean") || lowerCol.includes("barra")) {
+              initialMappings[col] = "barcode";
+            } else if (lowerCol === "desart" || lowerCol === "nomart" || lowerCol.includes("nombre") || lowerCol.includes("descrip") || lowerCol === "name") {
+              initialMappings[col] = "name";
+            } else if (lowerCol === "pcoart" || lowerCol.includes("coste") || lowerCol.includes("costo") || lowerCol === "cost") {
+              initialMappings[col] = "standard_price";
+            } else if (lowerCol === "pvpart" || lowerCol.includes("venta") || lowerCol.includes("pvp") || lowerCol === "price" || lowerCol === "list_price") {
+              initialMappings[col] = "list_price";
+            } else if (lowerCol === "famart" || lowerCol.includes("familia") || lowerCol.includes("categor") || lowerCol === "category") {
+              initialMappings[col] = "_category";
+            } else {
+              initialMappings[col] = "";
+            }
+          });
+        } else if (selectedModel.startsWith("account.move")) {
+          columns.forEach((col: string) => {
+            const lowerCol = col.toLowerCase();
+            if (selectedModel === "account.move") {
+              // Facturas de clientes
+              if (lowerCol === "codfac" || lowerCol === "numfac" || lowerCol === "factura" || lowerCol === "id" || lowerCol === "name") {
+                initialMappings[col] = "name";
+              } else if (lowerCol === "fecfac" || lowerCol === "fecha" || lowerCol === "invoice_date") {
+                initialMappings[col] = "invoice_date";
+              } else if (lowerCol === "clifac" || lowerCol === "codcli" || lowerCol === "cliente" || lowerCol === "_partner_code") {
+                initialMappings[col] = "_partner_code";
+              } else if (lowerCol === "obsfac" || lowerCol === "observaciones" || lowerCol === "narration" || lowerCol === "obs") {
+                initialMappings[col] = "narration";
+              } else if (lowerCol === "reffac" || lowerCol === "referencia" || lowerCol === "ref") {
+                initialMappings[col] = "ref";
+              } else {
+                initialMappings[col] = "";
+              }
+            } else {
+              // Facturas de proveedores (account.move.supplier)
+              if (lowerCol === "codfrt" || lowerCol === "numfrt" || lowerCol === "factura" || lowerCol === "id" || lowerCol === "name") {
+                initialMappings[col] = "name";
+              } else if (lowerCol === "fecfrt" || lowerCol === "fecha" || lowerCol === "invoice_date") {
+                initialMappings[col] = "invoice_date";
+              } else if (lowerCol === "profrt" || lowerCol === "codpro" || lowerCol === "proveedor" || lowerCol === "_partner_code") {
+                initialMappings[col] = "_partner_code";
+              } else if (lowerCol === "obsfrt" || lowerCol === "observaciones" || lowerCol === "narration" || lowerCol === "obs") {
+                initialMappings[col] = "narration";
+              } else if (lowerCol === "reffrt" || lowerCol === "referencia" || lowerCol === "ref") {
+                initialMappings[col] = "ref";
+              } else {
+                initialMappings[col] = "";
+              }
+            }
+          });
+        } else if (selectedModel === "sale.order") {
+          columns.forEach((col: string) => {
+            const lowerCol = col.toLowerCase();
+            if (lowerCol === "codped" || lowerCol === "numped" || lowerCol === "pedido" || lowerCol === "id" || lowerCol === "name" || lowerCol === "codfac" || lowerCol === "numfac") {
+              initialMappings[col] = "name";
+            } else if (lowerCol === "fecped" || lowerCol === "fecha" || lowerCol === "date_order" || lowerCol === "fecfac") {
+              initialMappings[col] = "date_order";
+            } else if (lowerCol === "cliped" || lowerCol === "codcli" || lowerCol === "cliente" || lowerCol === "_partner_code" || lowerCol === "clifac") {
+              initialMappings[col] = "_partner_code";
+            } else if (lowerCol === "obsped" || lowerCol === "observaciones" || lowerCol === "note" || lowerCol === "obs" || lowerCol === "obsfac") {
+              initialMappings[col] = "note";
+            } else if (lowerCol === "refped" || lowerCol === "referencia" || lowerCol === "ref") {
+              initialMappings[col] = "client_order_ref";
+            } else {
+              initialMappings[col] = "";
+            }
+          });
+        } else if (selectedModel === "account.move.entry") {
+          columns.forEach((col: string) => {
+            const lowerCol = col.toLowerCase();
+            if (lowerCol === "asiapu" || lowerCol === "asiento" || lowerCol === "id" || lowerCol === "name") {
+              initialMappings[col] = "name";
+            } else if (lowerCol === "fecapu" || lowerCol === "fecha" || lowerCol === "date") {
+              initialMappings[col] = "date";
+            } else if (lowerCol === "docapu" || lowerCol === "documento" || lowerCol === "referencia" || lowerCol === "ref") {
+              initialMappings[col] = "ref";
+            } else if (lowerCol === "diaapu" || lowerCol === "diario" || lowerCol === "journal") {
+              initialMappings[col] = "journal_id";
+            } else if (lowerCol === "cueapu" || lowerCol === "cuenta" || lowerCol === "account") {
+              initialMappings[col] = "line_ids/account_id";
+            } else if (lowerCol === "conapu" || lowerCol === "concepto" || lowerCol === "glosa" || lowerCol === "descrip") {
+              initialMappings[col] = "line_ids/name";
+            } else if (lowerCol === "debe" || lowerCol === "debit") {
+              initialMappings[col] = "line_ids/debit";
+            } else if (lowerCol === "haber" || lowerCol === "credit") {
+              initialMappings[col] = "line_ids/credit";
+            } else if (lowerCol === "imeapu" || lowerCol === "importe" || lowerCol === "monto" || lowerCol === "amount") {
+              initialMappings[col] = "_line_amount";
+            } else if (lowerCol === "d-hapu" || lowerCol === "dh" || lowerCol === "debe_haber" || lowerCol === "lado" || lowerCol === "side") {
+              initialMappings[col] = "_line_side";
+            } else {
+              initialMappings[col] = "";
+            }
+          });
+        } else {
+          columns.forEach((col: string) => {
+            const lowerCol = col.toLowerCase();
+            if (lowerCol === "codcli" || lowerCol === "codpro" || lowerCol === "cod" || lowerCol === "código" || lowerCol === "id_cliente" || lowerCol === "id") {
+              initialMappings[col] = "__external_id";
+            } else if (lowerCol.includes("código") || lowerCol.includes("ref") || lowerCol.includes("referencia")) {
+              initialMappings[col] = "ref";
+            } else if (lowerCol.includes("nombre") || lowerCol.includes("razón") || lowerCol.includes("name") || lowerCol.includes("social")) {
+              initialMappings[col] = "name";
+            } else if (lowerCol.includes("cif") || lowerCol.includes("nif") || lowerCol.includes("vat") || lowerCol.includes("documento")) {
+              initialMappings[col] = "vat";
+            } else if (lowerCol.includes("mail") || lowerCol.includes("email") || lowerCol.includes("correo")) {
+              initialMappings[col] = "email";
+            } else if (lowerCol.includes("contacto") || lowerCol.includes("persona") || lowerCol.includes("representante") || lowerCol.includes("pcocli") || lowerCol.includes("pcopro")) {
+              initialMappings[col] = "contact_name";
+            } else if (lowerCol.includes("móvil") || lowerCol.includes("mobile") || lowerCol.includes("celular")) {
+              initialMappings[col] = "mobile";
+            } else if (lowerCol.includes("teléfono") || lowerCol.includes("phone")) {
+              initialMappings[col] = "phone";
+            } else if (lowerCol.includes("calle") || lowerCol.includes("dirección") || lowerCol.includes("street")) {
+              initialMappings[col] = "street";
+            } else if (lowerCol.includes("cp") || lowerCol.includes("postal") || lowerCol.includes("zip") || lowerCol.includes("c.postal")) {
+              initialMappings[col] = "zip";
+            } else if (lowerCol.includes("ciudad") || lowerCol.includes("población") || lowerCol.includes("city") || lowerCol.includes("municipio")) {
+              initialMappings[col] = "city";
+            } else if (lowerCol.includes("iban") || lowerCol.includes("swfcli") || lowerCol.includes("swfpro") || lowerCol.includes("cuenta") || lowerCol.includes("cuecli") || lowerCol.includes("cuepro")) {
+              initialMappings[col] = "bank_acc_number";
+            } else if (lowerCol.includes("banco") || lowerCol.includes("bancli") || lowerCol.includes("banpro") || lowerCol.includes("entidad")) {
+              initialMappings[col] = "bank_name";
+            } else {
+              initialMappings[col] = "";
+            }
+          });
+        }
+        // Autodetectar columna para ID externo
+        let defaultExtIdCol = "";
+        if (selectedModel === "product.template") {
+          const found = columns.find((col: string) => {
+            const lower = col.toLowerCase();
+            return lower === "codart" || lower === "código" || lower === "cod" || lower === "id" || lower === "referencia" || lower === "ref";
+          });
+          if (found) defaultExtIdCol = found;
+        } else if (selectedModel.startsWith("account.move") || selectedModel === "sale.order") {
+          const found = columns.find((col: string) => {
+            const lower = col.toLowerCase();
+            return lower === "codfac" || lower === "codfrt" || lower === "codped" || lower === "numfac" || lower === "numfrt" || lower === "numped" || lower === "factura" || lower === "pedido" || lower === "id" || lower === "name";
+          });
+          if (found) defaultExtIdCol = found;
+        } else {
+          const found = columns.find((col: string) => {
+            const lower = col.toLowerCase();
+            return lower === "codcli" || lower === "codpro" || lower === "cod" || lower === "código" || lower === "id_cliente" || lower === "id";
+          });
+          if (found) defaultExtIdCol = found;
+        }
+        setExternalIdColumn(defaultExtIdCol);
+
+        // Autodetectar tabla de categorías/familias
+        const foundFamTable = tables.find((t: string) => {
+          const lower = t.toLowerCase();
+          return lower === "f_fam" || lower === "familias" || lower === "familia" || lower === "families" || lower === "category" || lower === "categories";
         });
+        setCategoriesTable(foundFamTable || "");
+
         setMappings(initialMappings);
       } else {
         alert("Error al analizar la hoja/tabla: " + response.error);
@@ -381,6 +552,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
 
     try {
       const response = await callPython("run_migration", {
+        model: selectedModel,
         odoo: {
           url: client.odoo_url,
           db: client.odoo_db,
@@ -398,7 +570,11 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           update_existing: updateExisting,
           ref_prefix: "",
           external_id_prefix: externalIdPrefix,
+          external_id_column: externalIdColumn,
+          categories_table: categoriesTable,
           batch_size: batchSize,
+          confirm_orders: confirmOrders,
+          post_entries: postEntries,
         },
         dry_run: isDryRun,
       });
@@ -539,10 +715,103 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                 </div>
               </div>
 
+              <div
+                onClick={() => setSelectedModel("product.template")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "product.template"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Productos (product.template)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `product.template`. Creación e importación de artículos/productos (F_ART) con SKU, precios y deduplicación.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedModel("account.move")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "account.move"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Facturas de Clientes (account.move)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `account.move` (out_invoice). Importa facturas de clientes (F_FAC + F_LFA) vinculando clientes e impuestos.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedModel("account.move.supplier")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "account.move.supplier"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Facturas de Proveedores (account.move)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `account.move` (in_invoice). Importa facturas de proveedores/recibidas (F_FRT + F_LFR) vinculando proveedores e impuestos.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedModel("sale.order")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "sale.order"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Pedidos de Venta (sale.order)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `sale.order`. Importa facturas/pedidos como pedidos de venta históricos (F_PED + F_LPE o F_FAC + F_LFA) vinculando clientes e impuestos.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setSelectedModel("account.move.entry")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "account.move.entry"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Asientos Contables (account.move)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `account.move` (entry). Importa asientos y apuntes contables (F_APU) agrupándolos y vinculando cuentas contables y partners.
+                  </p>
+                </div>
+              </div>
+
               {[
-                { name: "product.template", label: "Productos (Templates)", desc: "Capa `product.template`. Creación de SKU, precios e impuestos. (Próximamente)" },
                 { name: "stock.quant", label: "Stock Inicial (Quants)", desc: "Capa `stock.quant`. Ajustes de inventario por almacén. (Próximamente)" },
-                { name: "account.move", label: "Facturas y Asientos", desc: "Capa `account.move`. Asientos contables históricos complejos. (Próximamente)" },
               ].map((m) => (
                 <div
                   key={m.name}
@@ -841,6 +1110,86 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   className="bg-secondary border border-border rounded px-2.5 py-1 text-white outline-none focus:border-primary/50 text-xs w-28 text-right font-mono"
                 />
               </div>
+              <div className="h-[1px] bg-border" />
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="font-bold text-xs">Columna para ID Externo (XML ID)</h4>
+                  <p className="text-[10px] text-muted-foreground">Columna del archivo origen para identificar registros en Odoo.</p>
+                </div>
+                <select
+                  value={externalIdColumn}
+                  disabled={isMigrating}
+                  onChange={(e) => setExternalIdColumn(e.target.value)}
+                  className="bg-secondary border border-border rounded px-2.5 py-1.5 text-white outline-none focus:border-primary/50 text-xs w-44 text-right font-mono"
+                >
+                  <option value="">-- Autodetectar / Omitir --</option>
+                  {sourceColumns.map((col) => (
+                    <option key={col} value={col}>
+                      {col}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedModel === "product.template" && (
+                <>
+                  <div className="h-[1px] bg-border" />
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-xs">Tabla de Categorías/Familias</h4>
+                      <p className="text-[10px] text-muted-foreground">Tabla secundaria que traduce los códigos de familia a nombres reales.</p>
+                    </div>
+                    <select
+                      value={categoriesTable}
+                      disabled={isMigrating}
+                      onChange={(e) => setCategoriesTable(e.target.value)}
+                      className="bg-secondary border border-border rounded px-2.5 py-1.5 text-white outline-none focus:border-primary/50 text-xs w-44 text-right font-mono"
+                    >
+                      <option value="">-- Autodetectar / Ninguna --</option>
+                      {tables.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+              {selectedModel === "sale.order" && (
+                <>
+                  <div className="h-[1px] bg-border" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs">Confirmar Pedidos automáticamente</h4>
+                      <p className="text-[10px] text-muted-foreground">Confirma los presupuestos de venta convirtiéndolos en pedidos de venta (sale).</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={confirmOrders}
+                      disabled={isMigrating}
+                      onChange={(e) => setConfirmOrders(e.target.checked)}
+                      className="w-4 h-4 accent-primary"
+                    />
+                  </div>
+                </>
+              )}
+              {selectedModel === "account.move.entry" && (
+                <>
+                  <div className="h-[1px] bg-border" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs">Publicar Asientos automáticamente</h4>
+                      <p className="text-[10px] text-muted-foreground">Publica/asienta las entradas contables directamente (estado asimilado a posted).</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={postEntries}
+                      disabled={isMigrating}
+                      onChange={(e) => setPostEntries(e.target.checked)}
+                      className="w-4 h-4 accent-primary"
+                    />
+                  </div>
+                </>
+              )}
               <div className="h-[1px] bg-border" />
               <div className="flex items-center justify-between gap-4">
                 <div>

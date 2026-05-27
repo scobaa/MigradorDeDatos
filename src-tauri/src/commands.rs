@@ -1,9 +1,26 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::io::{Write, BufRead, BufReader};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
-fn find_python_engine() -> Result<(PathBuf, PathBuf), String> {
+fn get_system_python() -> PathBuf {
+    PathBuf::from(if cfg!(target_os = "windows") { "python" } else { "python3" })
+}
+
+fn find_python_engine(app_handle: &tauri::AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    // 1. Intentar buscar en el directorio de recursos de la App empaquetada (Modo Producción)
+    if let Ok(res_dir) = app_handle.path().resource_dir() {
+        let engine_dir = res_dir.join("python-engine");
+        if engine_dir.exists() && engine_dir.is_dir() {
+            let main_script = engine_dir.join("main.py");
+            if main_script.exists() {
+                let python_exe = get_system_python();
+                return Ok((python_exe, main_script));
+            }
+        }
+    }
+
+    // 2. Fallback a desarrollo (Modo Desarrollo/CWD)
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     
     let candidates = vec![
@@ -24,7 +41,7 @@ fn find_python_engine() -> Result<(PathBuf, PathBuf), String> {
             let python_exe = if venv_exe.exists() {
                 venv_exe
             } else {
-                PathBuf::from(if cfg!(target_os = "windows") { "python" } else { "python3" })
+                get_system_python()
             };
 
             let main_script = engine_dir.join("main.py");
@@ -32,7 +49,7 @@ fn find_python_engine() -> Result<(PathBuf, PathBuf), String> {
         }
     }
 
-    Err("No se pudo localizar el directorio python-engine. Asegúrate de ejecutar la app desde el repositorio.".to_string())
+    Err("No se pudo localizar el directorio python-engine. Asegúrate de ejecutar la app desde el repositorio o instalarla correctamente.".to_string())
 }
 
 #[tauri::command]
@@ -41,7 +58,7 @@ pub async fn run_python(
     command: String,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let (python_exe, script_path) = find_python_engine()?;
+    let (python_exe, script_path) = find_python_engine(&app)?;
 
     let input_payload = serde_json::json!({
         "command": command,

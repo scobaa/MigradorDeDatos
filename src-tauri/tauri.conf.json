@@ -25,6 +25,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "resources": [
+      "../python-engine/*.py",
+      "../python-engine/migrator/*.py",
+      "../python-engine/transformers/*.py",
+      "../python-engine/connectors/*.py",
+      "../python-engine/requirements.txt"
+    ]
   }
 }

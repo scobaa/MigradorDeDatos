@@ -1,0 +1,346 @@
+"""
+Migrador de sale.order (Pedidos de Venta).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import sys
+from dataclasses import dataclass, field
+from typing import Any, Iterable
+
+from migrator.odoo_client import OdooClient
+from transformers.sales import transform_sales_order
+
+log = logging.getLogger(__name__)
+
+SALES_ORDER_MODEL = "sale.order"
+
+
+@dataclass
+class MigrationOptions:
+    """Opciones de la migración de pedidos."""
+    update_existing: bool = True
+    batch_size: int = 50
+    external_id_prefix: str = "so_"
+    confirm_orders: bool = True
+
+
+@dataclass
+class MigrationStats:
+    """Estadísticas acumuladas de la migración."""
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    errors: list[dict[str, Any]] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "created": self.created,
+            "updated": self.updated,
+            "skipped": self.skipped,
+            "error_count": len(self.errors),
+            "errors": self.errors,
+        }
+
+
+def _emit_progress(event: dict[str, Any]) -> None:
+    """Escribe un evento de progreso como línea JSON en stderr."""
+    sys.stderr.write(json.dumps({"event": "progress", **event}, ensure_ascii=False))
+    sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
+def clean_xml_id(text: str) -> str:
+    """Normaliza un texto para usarlo como XML ID válido en Odoo."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", text)
+
+
+class SalesOrderMigrator:
+    """Migra pedidos de venta hacia el modelo sale.order de Odoo."""
+
+    def __init__(
+        self,
+        odoo: OdooClient,
+        mapping: dict[str, str],
+        options: MigrationOptions | None = None,
+    ) -> None:
+        self.odoo = odoo
+        self.mapping = mapping
+        self.options = options or MigrationOptions()
+
+        # Cachés locales
+        self._partner_cache: dict[str, int | None] = {}
+        self._product_cache: dict[str, int | None] = {}
+        self._tax_cache: dict[tuple[str, str], int | None] = {}
+
+    def _resolve_partner(self, partner_code: str | None) -> int | None:
+        """Busca el ID del partner en Odoo usando ID externo, ref o nombre."""
+        if not partner_code:
+            return None
+
+        key = str(partner_code).strip()
+        if key in self._partner_cache:
+            return self._partner_cache[key]
+
+        try:
+            # 1. Buscar por XML ID (los pedidos siempre vinculan res.partner clientes)
+            xml_id = f"cli_{key}"
+            partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
+            if partner_id:
+                self._partner_cache[key] = partner_id
+                return partner_id
+
+            # 2. Buscar por ref
+            ids = self.odoo.search("res.partner", [("ref", "=", key)])
+            if ids:
+                self._partner_cache[key] = ids[0]
+                return ids[0]
+
+            # 3. Buscar por name
+            ids = self.odoo.search("res.partner", [("name", "=", key)])
+            if ids:
+                self._partner_cache[key] = ids[0]
+                return ids[0]
+        except Exception as e:
+            log.warning("Error al resolver partner '%s': %s", key, e)
+
+        self._partner_cache[key] = None
+        return None
+
+    def _resolve_product(self, product_code: str | None) -> int | None:
+        """Busca el ID del producto (variante) en Odoo."""
+        if not product_code:
+            return None
+
+        key = str(product_code).strip()
+        if key in self._product_cache:
+            return self._product_cache[key]
+
+        try:
+            # 1. Buscar por default_code (SKU)
+            ids = self.odoo.search("product.product", [("default_code", "=", key)])
+            if ids:
+                self._product_cache[key] = ids[0]
+                return ids[0]
+
+            # 2. Buscar por XML ID de product.template
+            xml_id = f"art_{key}"
+            tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
+            if tmpl_id:
+                p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
+                if p_ids:
+                    self._product_cache[key] = p_ids[0]
+                    return p_ids[0]
+
+            # 3. Buscar por código de barras
+            ids = self.odoo.search("product.product", [("barcode", "=", key)])
+            if ids:
+                self._product_cache[key] = ids[0]
+                return ids[0]
+        except Exception as e:
+            log.warning("Error al resolver producto '%s': %s", key, e)
+
+        self._product_cache[key] = None
+        return None
+
+    def _resolve_tax(self, tax_value: str | None) -> int | None:
+        """Busca un impuesto de venta en Odoo por nombre, porcentaje o aproximación."""
+        if not tax_value:
+            return None
+
+        val = str(tax_value).strip()
+        key = (val.lower(), "sale")
+        if key in self._tax_cache:
+            return self._tax_cache[key]
+
+        try:
+            # 1. Coincidencia exacta
+            tax_id = self.odoo.get_tax_id(val, "sale")
+            if tax_id:
+                self._tax_cache[key] = tax_id
+                return tax_id
+
+            # 2. Coincidencia parcial (ilike)
+            ids = self.odoo.search(
+                "account.tax", [("name", "ilike", val), ("type_tax_use", "=", "sale")]
+            )
+            if ids:
+                self._tax_cache[key] = ids[0]
+                return ids[0]
+
+            # 3. Búsqueda por porcentaje numérico
+            digits_match = re.search(r"(\d+(?:\.\d+)?)", val)
+            if digits_match:
+                pct = float(digits_match.group(1))
+                domain = [
+                    ("type_tax_use", "=", "sale"),
+                    "|",
+                    ("amount", "=", pct),
+                    ("amount", "=", pct / 100.0),
+                ]
+                ids = self.odoo.search("account.tax", domain)
+                if ids:
+                    self._tax_cache[key] = ids[0]
+                    return ids[0]
+        except Exception as e:
+            log.warning("Error al resolver impuesto '%s': %s", val, e)
+
+        self._tax_cache[key] = None
+        return None
+
+    def _process_row(self, row: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+        """Transforma una fila cruda y resuelve sus relaciones in-place."""
+        vals = transform_sales_order(row, self.mapping)
+
+        # 1. Resolver partner
+        partner_code = vals.pop("_partner_code", None)
+        partner_id = self._resolve_partner(partner_code)
+        if not partner_id:
+            raise ValueError(
+                f"No se pudo encontrar ningún cliente en Odoo para el código '{partner_code}'."
+            )
+        vals["partner_id"] = partner_id
+
+        # 2. Resolver líneas de pedido
+        lines = vals.pop("_lines", [])
+        order_line_ids = []
+
+        for line in lines:
+            product_code = line.pop("product_code", None)
+            product_id = self._resolve_product(product_code)
+
+            line_vals = {
+                "name": line["name"],
+                "product_uom_qty": line["quantity"],
+                "price_unit": line["price_unit"],
+            }
+            if product_id:
+                line_vals["product_id"] = product_id
+
+            tax_val = line.pop("tax_value", None)
+            if tax_val:
+                tax_id = self._resolve_tax(tax_val)
+                if tax_id:
+                    line_vals["tax_ids"] = [(6, 0, [tax_id])]
+
+            order_line_ids.append((0, 0, line_vals))
+
+        if not order_line_ids:
+            raise ValueError("El pedido debe contener al menos una línea con cantidad e importe.")
+
+        vals["order_line"] = order_line_ids
+        return vals
+
+    def run(
+        self,
+        rows: Iterable[dict[str, Any]],
+        total: int = 0,
+        dry_run: bool = False,
+    ) -> MigrationStats:
+        """Migra pedidos ejecutando la inserción/actualización en Odoo."""
+        stats = MigrationStats()
+        log.info(
+            "Iniciando migración de pedidos de venta (dry_run=%s, total=%s)",
+            dry_run,
+            total,
+        )
+
+        for idx, row in enumerate(rows):
+            row_idx = idx + 1
+            try:
+                # 1. Transformar y resolver relaciones
+                vals = self._process_row(row, dry_run)
+                name = vals.get("name")
+                if not name or name == "/":
+                    raise ValueError("El código de pedido original (campo 'name') es obligatorio.")
+
+                # Generar XML ID único para el pedido
+                clean_name = clean_xml_id(name)
+                xml_id = f"so_{clean_name}"
+
+                # 2. Comprobar si ya existe
+                existing_id = self.odoo.get_xml_id_res_id(xml_id, SALES_ORDER_MODEL)
+
+                if existing_id:
+                    if not self.options.update_existing:
+                        stats.skipped += 1
+                        _emit_progress({
+                            "done": row_idx,
+                            "total": total,
+                            "action": "skipped",
+                            "name": name,
+                        })
+                        continue
+
+                    # Actualización
+                    if not dry_run:
+                        # Mover a borrador si está confirmado (sale / done) o cancelado
+                        order_data = self.odoo.read(SALES_ORDER_MODEL, [existing_id], ["state"])
+                        if order_data and order_data[0]["state"] in ("sale", "done", "cancel"):
+                            try:
+                                # Si está confirmado, primero cancelar y luego a draft
+                                if order_data[0]["state"] in ("sale", "done"):
+                                    self.odoo.execute(SALES_ORDER_MODEL, "action_cancel", [existing_id])
+                                self.odoo.execute(SALES_ORDER_MODEL, "action_draft", [existing_id])
+                            except Exception as e:
+                                log.warning("Fallo al cambiar estado a draft para actualizar pedido: %s", e)
+
+                        # Reemplazar líneas: (5, 0, 0) borra las existentes, luego agregamos las nuevas
+                        vals["order_line"] = [(5, 0, 0)] + vals["order_line"]
+                        
+                        # Limpiar campos Odoo
+                        clean_vals = self.odoo.filter_vals(SALES_ORDER_MODEL, vals)
+                        self.odoo.write(SALES_ORDER_MODEL, [existing_id], clean_vals)
+
+                        # Volver a confirmar si la opción está activa
+                        if self.options.confirm_orders:
+                            try:
+                                self.odoo.execute(SALES_ORDER_MODEL, "action_confirm", [existing_id])
+                            except Exception as e:
+                                log.debug("Excepción silenciada en action_confirm: %s", e)
+
+                    stats.updated += 1
+                    _emit_progress({
+                        "done": row_idx,
+                        "total": total,
+                        "action": "updated",
+                        "name": name,
+                    })
+
+                else:
+                    # Creación
+                    if not dry_run:
+                        clean_vals = self.odoo.filter_vals(SALES_ORDER_MODEL, vals)
+                        new_id = self.odoo.create(SALES_ORDER_MODEL, clean_vals)
+                        self.odoo.create_or_update_xml_id(xml_id, SALES_ORDER_MODEL, new_id)
+
+                        # Confirmar pedido si está activa la opción
+                        if self.options.confirm_orders:
+                            try:
+                                self.odoo.execute(SALES_ORDER_MODEL, "action_confirm", [new_id])
+                            except Exception as e:
+                                log.debug("Excepción silenciada en action_confirm: %s", e)
+
+                    stats.created += 1
+                    _emit_progress({
+                        "done": row_idx,
+                        "total": total,
+                        "action": "created",
+                        "name": name,
+                    })
+
+            except Exception as e:
+                log.exception("Error procesando pedido en fila %s", row_idx)
+                stats.errors.append({"row": row_idx, "error": str(e), "data": row})
+                _emit_progress({
+                    "done": row_idx,
+                    "total": total,
+                    "action": "error",
+                    "message": str(e),
+                })
+
+        log.info("Migración de pedidos finalizada: %s", stats.as_dict())
+        return stats

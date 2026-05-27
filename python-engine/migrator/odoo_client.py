@@ -95,7 +95,7 @@ class OdooClient:
         """Autentica contra Odoo. Lanza ConnectionError si falla."""
         # Establecer el timeout predeterminado a nivel de socket para compatibilidad con todas las versiones de Python
         socket.setdefaulttimeout(15.0)
-        common = xmlrpc.client.ServerProxy(f"{self.config.url}/xmlrpc/2/common")
+        common = xmlrpc.client.ServerProxy(f"{self.config.url}/xmlrpc/2/common", allow_none=True)
         self.uid = common.authenticate(
             self.config.db, self.config.username, self.config.password, {}
         )
@@ -103,7 +103,7 @@ class OdooClient:
             raise ConnectionError("Credenciales incorrectas o Odoo inaccesible")
 
         self._models = xmlrpc.client.ServerProxy(
-            f"{self.config.url}/xmlrpc/2/object"
+            f"{self.config.url}/xmlrpc/2/object", allow_none=True
         )
         log.info("Conectado a Odoo db=%s uid=%s", self.config.db, self.uid)
 
@@ -224,9 +224,15 @@ class OdooClient:
         return self._valid_fields[model]
 
     def filter_vals(self, model: str, vals: dict) -> dict:
-        """Elimina de vals los campos que no existen en el modelo Odoo."""
+        """Elimina de vals los campos que no existen en el modelo Odoo y normaliza None a False."""
         valid = self.get_valid_fields(model)
         filtered = {k: v for k, v in vals.items() if k in valid}
+        
+        # Convertir None a False para evitar errores de serialización XML-RPC
+        for k, v in filtered.items():
+            if v is None:
+                filtered[k] = False
+                
         removed = set(vals) - set(filtered)
         if removed:
             log.warning("Campos eliminados por no existir en %s: %s", model, sorted(removed))

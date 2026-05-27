@@ -66,6 +66,7 @@ class MigrationOptions:
     update_existing: bool = True  # si False, los duplicados se omiten
     ref_prefix: str = ""          # prefijo para el campo ref (ej. "cli_" en FactuSOL)
     external_id_prefix: str = "cli_"
+    external_id_column: str | None = None
     batch_size: int = 100
 
 
@@ -258,7 +259,9 @@ class PartnerMigrator:
         records = []
         rev_mapping = {v: k for k, v in self.mapping.items()}
 
-        external_id_col = rev_mapping.get("__external_id")
+        external_id_col = self.options.external_id_column
+        if not external_id_col:
+            external_id_col = rev_mapping.get("__external_id")
         contact_name_col = rev_mapping.get("contact_name")
         contact_email_col = rev_mapping.get("contact_email")
         contact_phone_col = rev_mapping.get("contact_phone")

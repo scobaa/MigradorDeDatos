@@ -118,6 +118,155 @@ def _open_connector(path: str):
     )
 
 
+def _find_lines_table(conn: Any, header_table: str) -> str | None:
+    tables = conn.list_tables()
+    ht_lower = header_table.lower()
+    
+    is_csv = hasattr(conn, "path") and conn.path.lower().endswith(".csv")
+    if is_csv:
+        import os
+        dir_path = os.path.dirname(conn.path)
+        files = os.listdir(dir_path)
+        if "f_fac" in ht_lower:
+            for f in files:
+                if "f_lfa" in f.lower() and f.lower().endswith(".csv"):
+                    return os.path.join(dir_path, f)
+        elif "f_frt" in ht_lower:
+            for f in files:
+                if "f_lfr" in f.lower() and f.lower().endswith(".csv"):
+                    return os.path.join(dir_path, f)
+        elif "f_ped" in ht_lower:
+            for f in files:
+                if "f_lpe" in f.lower() and f.lower().endswith(".csv"):
+                    return os.path.join(dir_path, f)
+        for f in files:
+            fl = f.lower()
+            if "line" in fl or "lfa" in fl or "lfr" in fl or "lpe" in fl:
+                if f.lower().endswith(".csv"):
+                    return os.path.join(dir_path, f)
+        return None
+
+    if "f_fac" in ht_lower:
+        for t in tables:
+            if "f_lfa" in t.lower():
+                return t
+    if "f_frt" in ht_lower:
+        for t in tables:
+            if "f_lfr" in t.lower():
+                return t
+    if "f_ped" in ht_lower:
+        for t in tables:
+            if "f_lpe" in t.lower():
+                return t
+                
+    if any(k in ht_lower for k in ("invoice", "fac", "venta", "sale")):
+        for t in tables:
+            tl = t.lower()
+            if any(k in tl for k in ("line", "lfa")):
+                if "frt" not in tl and "lfr" not in tl:
+                    return t
+    if any(k in ht_lower for k in ("bill", "frt", "compra", "recibida", "purchase")):
+        for t in tables:
+            tl = t.lower()
+            if any(k in tl for k in ("line", "lfr")):
+                return t
+    if any(k in ht_lower for k in ("order", "ped", "quote", "presupuesto")):
+        for t in tables:
+            tl = t.lower()
+            if any(k in tl for k in ("line", "lpe")):
+                return t
+                
+    return None
+
+
+def _detect_link_col(columns: list[str], table: str) -> str | None:
+    link_col = None
+    ht_lower = table.lower()
+    if "f_fac" in ht_lower:
+        patterns = ("codlfa", "codfac", "numfac", "factura", "id")
+    elif "f_frt" in ht_lower:
+        patterns = ("codlfr", "codfrt", "numfrt", "factura", "id")
+    elif "f_ped" in ht_lower:
+        patterns = ("codlpe", "codped", "numped", "pedido", "id")
+    else:
+        patterns = ("codlfa", "codlfr", "codlpe", "codfac", "codfrt", "codped", "numfac", "numfrt", "numped", "factura", "pedido", "id")
+        
+    for pat in patterns:
+        for col in columns:
+            if col.lower() == pat:
+                link_col = col
+                break
+        if link_col:
+            break
+            
+    if not link_col:
+        for col in columns:
+            cl = col.lower()
+            if any(k in cl for k in ("cod", "num", "fac", "frt", "id")):
+                link_col = col
+                break
+                
+    if not link_col:
+        log.warning("No se pudo detectar la columna de enlace en la tabla de líneas")
+    else:
+        log.info("Columna de enlace detectada en líneas: '%s'", link_col)
+    return link_col
+
+
+def _add_row_to_grouped(row: dict[str, Any], link_col: str, grouped_lines: dict[str, list[dict[str, Any]]]) -> None:
+    link_val = row.get(link_col)
+    if link_val is not None:
+        key = str(link_val).strip()
+        if key.endswith(".0"):
+            key = key[:-2]
+        grouped_lines.setdefault(key, []).append(row)
+
+
+def _preload_invoice_lines(conn: Any, table: str, mapping: dict[str, str]) -> dict[str, list[dict[str, Any]]] | None:
+    name_col = None
+    for src_col, odoo_field in mapping.items():
+        if odoo_field == "name":
+            name_col = src_col
+            break
+            
+    if not name_col:
+        log.warning("No se mapeó ninguna columna a 'name' (número de factura). No se pueden agrupar líneas.")
+        return None
+
+    lines_table = _find_lines_table(conn, table)
+    if not lines_table:
+        log.warning("No se encontró tabla de líneas correspondiente para '%s'", table)
+        return None
+
+    log.info("Cargando y agrupando líneas desde: %s", lines_table)
+    grouped_lines: dict[str, list[dict[str, Any]]] = {}
+    
+    try:
+        if os.path.isfile(lines_table):
+            # Es un archivo CSV
+            with _open_connector(lines_table) as lines_conn:
+                sample_cols = lines_conn.get_columns("CSV")
+                link_col = _detect_link_col(sample_cols, table)
+                if not link_col:
+                    return None
+                for row in lines_conn.iter_rows("CSV"):
+                    _add_row_to_grouped(row, link_col, grouped_lines)
+        else:
+            # Es una tabla en Excel/Access
+            sample_cols = conn.get_columns(lines_table)
+            link_col = _detect_link_col(sample_cols, table)
+            if not link_col:
+                return None
+            for row in conn.iter_rows(lines_table):
+                _add_row_to_grouped(row, link_col, grouped_lines)
+                
+        log.info("Cargadas líneas agrupadas para %d facturas", len(grouped_lines))
+        return grouped_lines
+    except Exception as e:
+        log.exception("Error cargando líneas de factura: %s", e)
+        return None
+
+
 def handle_analyze_source(args: dict) -> None:
     """
     Lee el fichero fuente y devuelve metadatos.
@@ -157,32 +306,114 @@ def handle_preview_migration(args: dict) -> None:
     """
     Transforma las primeras N filas según el mapeo, sin escribir en Odoo.
 
-    args: {path, table, mapping, options?, limit?}
+    args: {path, table, mapping, options?, limit?, model?}
     Devuelve {rows: [{ok, data|error}], count}.
     """
-    from transformers.partners import transform_partner
-
     path = args["path"]
     table = args["table"]
     mapping = args["mapping"]
     options = args.get("options", {})
     limit = int(args.get("limit", 10))
-
-    transform_kwargs = {
-        "default_country": options.get("default_country", "ES"),
-        "customer_rank": options.get("customer_rank", 1),
-        "supplier_rank": options.get("supplier_rank", 0),
-        "infer_company": options.get("infer_company", True),
-    }
+    model = args.get("model", "res.partner")
 
     results = []
     with _open_connector(path) as conn:
-        for row in conn.iter_rows(table, limit=limit):
-            try:
-                vals = transform_partner(row, mapping, **transform_kwargs)
-                results.append({"ok": True, "data": vals})
-            except Exception as e:  # noqa: BLE001 - reportar fila a fila
-                results.append({"ok": False, "error": str(e), "source": row})
+        if model == "account.move.entry":
+            name_col = None
+            for src_col, odoo_field in mapping.items():
+                if odoo_field in ("name", "__external_id"):
+                    name_col = src_col
+                    break
+            if not name_col:
+                raise ValueError("Se debe mapear una columna a 'name' o '__external_id' para agrupar los apuntes en asientos.")
+            
+            all_rows = list(conn.iter_rows(table))
+            grouped = {}
+            for row in all_rows:
+                key = str(row.get(name_col, "")).strip()
+                if key.endswith(".0"):
+                    key = key[:-2]
+                if key:
+                    grouped.setdefault(key, []).append(row)
+            
+            preview_rows = []
+            for key, lines in list(grouped.items())[:limit]:
+                header = dict(lines[0])
+                header["_lines"] = lines
+                preview_rows.append(header)
+                
+            for row in preview_rows:
+                try:
+                    from transformers.journal import transform_journal_entry
+                    vals = transform_journal_entry(row, mapping)
+                    results.append({"ok": True, "data": vals})
+                except Exception as e:  # noqa: BLE001 - reportar fila a fila
+                    results.append({"ok": False, "error": str(e), "source": row})
+        else:
+            # Pre-cargar líneas si es factura o pedido
+            grouped_lines = None
+            if model.startswith("account.move") or model == "sale.order":
+                grouped_lines = _preload_invoice_lines(conn, table, mapping)
+
+            for row in conn.iter_rows(table, limit=limit):
+                try:
+                    if model.startswith("res.partner"):
+                        from transformers.partners import transform_partner
+                        transform_kwargs = {
+                            "default_country": options.get("default_country", "ES"),
+                            "customer_rank": options.get("customer_rank", 1),
+                            "supplier_rank": options.get("supplier_rank", 0),
+                            "infer_company": options.get("infer_company", True),
+                        }
+                        vals = transform_partner(row, mapping, **transform_kwargs)
+                    elif model == "product.template":
+                        from transformers.products import transform_product
+                        vals = transform_product(row, mapping)
+                    elif model.startswith("account.move"):
+                        from transformers.invoices import transform_invoice
+                        # Encontrar el código de factura en esta fila
+                        name_col = None
+                        for src_col, odoo_field in mapping.items():
+                            if odoo_field == "name":
+                                name_col = src_col
+                                break
+                        
+                        # Adjuntar líneas agrupadas correspondientes
+                        row_with_lines = dict(row)
+                        if name_col and grouped_lines:
+                            header_id = str(row.get(name_col, "")).strip()
+                            if header_id.endswith(".0"):
+                                header_id = header_id[:-2]
+                            row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                        else:
+                            row_with_lines["_lines"] = []
+
+                        move_type = "out_invoice" if model == "account.move" else "in_invoice"
+                        vals = transform_invoice(row_with_lines, mapping, move_type=move_type)
+                    elif model == "sale.order":
+                        from transformers.sales import transform_sales_order
+                        # Encontrar el código de pedido en esta fila
+                        name_col = None
+                        for src_col, odoo_field in mapping.items():
+                            if odoo_field == "name":
+                                name_col = src_col
+                                break
+                        
+                        row_with_lines = dict(row)
+                        if name_col and grouped_lines:
+                            header_id = str(row.get(name_col, "")).strip()
+                            if header_id.endswith(".0"):
+                                header_id = header_id[:-2]
+                            row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                        else:
+                            row_with_lines["_lines"] = []
+
+                        vals = transform_sales_order(row_with_lines, mapping)
+                    else:
+                        raise ValueError(f"Modelo no soportado para vista previa: {model}")
+                    results.append({"ok": True, "data": vals})
+                except Exception as e:  # noqa: BLE001 - reportar fila a fila
+                    results.append({"ok": False, "error": str(e), "source": row})
 
     respond("ok", data={"rows": results, "count": len(results)})
 
@@ -192,10 +423,9 @@ def handle_run_migration(args: dict) -> None:
     Ejecuta la migración real (o dry-run). Reporta progreso por stderr.
 
     args: {odoo: {url, db, username, password}, path, table, mapping,
-           options?, dry_run?}
+           options?, dry_run?, model?}
     """
     from migrator.odoo_client import OdooClient, OdooConfig
-    from migrator.partners import MigrationOptions, PartnerMigrator
 
     odoo_args = args["odoo"]
     path = args["path"]
@@ -203,17 +433,7 @@ def handle_run_migration(args: dict) -> None:
     mapping = args["mapping"]
     dry_run = bool(args.get("dry_run", False))
     opts = args.get("options", {})
-
-    options = MigrationOptions(
-        default_country=opts.get("default_country", "ES"),
-        customer_rank=opts.get("customer_rank", 1),
-        supplier_rank=opts.get("supplier_rank", 0),
-        infer_company=opts.get("infer_company", True),
-        update_existing=opts.get("update_existing", True),
-        ref_prefix=opts.get("ref_prefix", ""),
-        external_id_prefix=opts.get("external_id_prefix", "cli_"),
-        batch_size=int(opts.get("batch_size", 100)),
-    )
+    model = args.get("model", "res.partner")
 
     limit: int | None = int(args["limit"]) if args.get("limit") else None
 
@@ -227,14 +447,157 @@ def handle_run_migration(args: dict) -> None:
     )
     odoo.connect()
 
-    migrator = PartnerMigrator(odoo, mapping, options)
+    if model.startswith("res.partner"):
+        from migrator.partners import MigrationOptions as PartnerOptions, PartnerMigrator
+        partner_opts = PartnerOptions(
+            default_country=opts.get("default_country", "ES"),
+            customer_rank=int(opts.get("customer_rank", 1)),
+            supplier_rank=int(opts.get("supplier_rank", 0)),
+            infer_company=opts.get("infer_company", True),
+            update_existing=opts.get("update_existing", True),
+            ref_prefix=opts.get("ref_prefix", ""),
+            external_id_prefix=opts.get("external_id_prefix", "cli_"),
+            external_id_column=opts.get("external_id_column"),
+            batch_size=int(opts.get("batch_size", 100)),
+        )
+        migrator = PartnerMigrator(odoo, mapping, partner_opts)
+    elif model == "product.template":
+        from migrator.products import MigrationOptions as ProductOptions, ProductMigrator
+        
+        # Intentar pre-cargar nombres de familias desde la base de datos/archivo
+        families = {}
+        try:
+            with _open_connector(path) as conn:
+                tables_list = conn.list_tables()
+                fam_table = None
+                for t in tables_list:
+                    if t.lower() in ("f_fam", "familias", "familia", "families", "category", "categories"):
+                        fam_table = t
+                        break
+                
+                if fam_table:
+                    log.info("Cargando nombres de familias desde la tabla: %s", fam_table)
+                    for row in conn.iter_rows(fam_table):
+                        code = None
+                        name = None
+                        for k, v in row.items():
+                            kl = k.lower()
+                            if kl in ("codfam", "codigo", "code", "id", "cod"):
+                                code = str(v).strip()
+                            elif kl in ("desfam", "descripcion", "name", "nombre", "description", "des"):
+                                name = str(v).strip()
+                        
+                        if code and name:
+                            if code.endswith(".0"):
+                                code = code[:-2]
+                            families[code] = name
+                    log.info("Cargadas %d familias desde el origen para traducción de IDs", len(families))
+        except Exception as e:
+            log.warning("No se pudieron pre-cargar las familias desde el origen: %s", e)
+
+        product_opts = ProductOptions(
+            update_existing=opts.get("update_existing", True),
+            external_id_prefix=opts.get("external_id_prefix", "art_"),
+            external_id_column=opts.get("external_id_column"),
+            batch_size=int(opts.get("batch_size", 100)),
+        )
+        migrator = ProductMigrator(odoo, mapping, product_opts, families=families)
+    elif model == "account.move.entry":
+        from migrator.journal import MigrationOptions as JournalOptions, JournalEntryMigrator
+        journal_opts = JournalOptions(
+            update_existing=opts.get("update_existing", True),
+            external_id_prefix=opts.get("external_id_prefix", "asi_"),
+            batch_size=int(opts.get("batch_size", 50)),
+            post_entries=opts.get("post_entries", True),
+        )
+        migrator = JournalEntryMigrator(odoo, mapping, journal_opts)
+    elif model.startswith("account.move"):
+        from migrator.invoices import MigrationOptions as InvoiceOptions, InvoiceMigrator
+        invoice_opts = InvoiceOptions(
+            update_existing=opts.get("update_existing", True),
+            external_id_prefix=opts.get("external_id_prefix", "inv_"),
+            batch_size=int(opts.get("batch_size", 50)),
+        )
+        move_type = "out_invoice" if model == "account.move" else "in_invoice"
+        migrator = InvoiceMigrator(odoo, mapping, invoice_opts, move_type=move_type)
+    elif model == "sale.order":
+        from migrator.sales import MigrationOptions as SalesOptions, SalesOrderMigrator
+        sales_opts = SalesOptions(
+            update_existing=opts.get("update_existing", True),
+            external_id_prefix=opts.get("external_id_prefix", "so_"),
+            batch_size=int(opts.get("batch_size", 50)),
+            confirm_orders=opts.get("confirm_orders", True),
+        )
+        migrator = SalesOrderMigrator(odoo, mapping, sales_opts)
+    else:
+        raise ValueError(f"Modelo no soportado para migración: {model}")
+
     with _open_connector(path) as conn:
-        total = limit if limit else conn.count_rows(table)
+        if model == "account.move.entry":
+            name_col = None
+            for src_col, odoo_field in mapping.items():
+                if odoo_field in ("name", "__external_id"):
+                    name_col = src_col
+                    break
+            if not name_col:
+                raise ValueError("Se debe mapear una columna a 'name' o '__external_id' para agrupar los apuntes en asientos.")
+            
+            all_rows = list(conn.iter_rows(table))
+            grouped = {}
+            for row in all_rows:
+                key = str(row.get(name_col, "")).strip()
+                if key.endswith(".0"):
+                    key = key[:-2]
+                if key:
+                    grouped.setdefault(key, []).append(row)
+            
+            grouped_headers = []
+            for key, lines in grouped.items():
+                header = dict(lines[0])
+                header["_lines"] = lines
+                grouped_headers.append(header)
+            
+            total = len(grouped_headers)
+            rows_iter = grouped_headers[:limit] if limit else grouped_headers
+            rows_to_migrate = rows_iter
+        else:
+            total = limit if limit else conn.count_rows(table)
+            
+            # Pre-cargar líneas si es factura o pedido
+            grouped_lines = None
+            if model.startswith("account.move") or model == "sale.order":
+                grouped_lines = _preload_invoice_lines(conn, table, mapping)
+
+            rows_iter = conn.iter_rows(table, limit=limit)
+            if model.startswith("account.move") or model == "sale.order":
+                name_col = None
+                for src_col, odoo_field in mapping.items():
+                    if odoo_field == "name":
+                        name_col = src_col
+                        break
+                
+                def inject_lines_iter():
+                    for row in rows_iter:
+                        row_with_lines = dict(row)
+                        if name_col and grouped_lines:
+                            header_id = str(row.get(name_col, "")).strip()
+                            if header_id.endswith(".0"):
+                                header_id = header_id[:-2]
+                            row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                        else:
+                            row_with_lines["_lines"] = []
+                        yield row_with_lines
+                
+                rows_to_migrate = inject_lines_iter()
+            else:
+                rows_to_migrate = rows_iter
+
         stats = migrator.run(
-            conn.iter_rows(table, limit=limit), total=total, dry_run=dry_run
+            rows_to_migrate, total=total, dry_run=dry_run
         )
 
     respond("ok", data={"dry_run": dry_run, "stats": stats.as_dict()})
+
 
 
 def handle_get_odoo_fields(args: dict) -> None:

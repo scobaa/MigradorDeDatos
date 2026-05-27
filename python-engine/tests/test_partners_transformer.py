@@ -161,12 +161,24 @@ def test_transform_partner_sin_name_falla():
         transform_partner(row, mapping)
 
 
-def test_transform_partner_ignora_campos_no_soportados():
-    row = {"Nombre": "Juan", "Inventado": "x"}
-    mapping = {"Nombre": "name", "Inventado": "campo_que_no_existe"}
+def test_transform_partner_permite_campos_dinamicos_y_omite_virtuales():
+    row = {
+        "Nombre": "Juan",
+        "Inventado": "x",
+        "IdExt": "cli_1",
+        "Contacto": "María"
+    }
+    mapping = {
+        "Nombre": "name",
+        "Inventado": "campo_dinamico_nuevo",
+        "IdExt": "__external_id",
+        "Contacto": "contact_name"
+    }
     vals = transform_partner(row, mapping)
     assert vals["name"] == "Juan"
-    assert "campo_que_no_existe" not in vals
+    assert vals["campo_dinamico_nuevo"] == "x"
+    assert "__external_id" not in vals
+    assert "contact_name" not in vals
 
 
 def test_transform_partner_respeta_ranks_personalizados():
