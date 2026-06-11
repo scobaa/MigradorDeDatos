@@ -117,7 +117,16 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
 
             # Leer y volcar stderr en tiempo real a la consola del servidor y a un archivo de log
             import threading
-            log_file_path = os.path.join(engine_dir, "migration_debug.log")
+            from datetime import datetime
+            
+            logs_dir = os.path.join(engine_dir, "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            cmd_name = payload.get("command", "unknown")
+            log_filename = f"{cmd_name}_{timestamp}.log"
+            log_file_path = os.path.join(logs_dir, log_filename)
+            
             def log_stderr(pipe):
                 try:
                     with open(log_file_path, "a", encoding="utf-8") as log_file:

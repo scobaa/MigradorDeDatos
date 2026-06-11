@@ -1,3 +1,5 @@
+import { getSessionToken } from "./auth";
+
 export interface DBClient {
   id: string;
   name: string;
@@ -21,150 +23,66 @@ const isTauri = () => {
   return typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ !== undefined;
 };
 
-// --- DATOS INICIALES MOCK ---
-const DEFAULT_CLIENTS: DBClient[] = [
-  {
-    id: "1",
-    name: "Distribuidora del Norte",
-    odoo_url: "https://dist-norte.odoo.com",
-    odoo_db: "dist-norte-db",
-    odoo_user: "admin@distnorte.com",
-    odoo_password: "admin",
-    created_at: "2026-05-10",
-    last_used_at: "2026-05-24",
-  },
-  {
-    id: "2",
-    name: "Ferretería Industrial Martínez",
-    odoo_url: "https://martinez-industrial.odoo.com",
-    odoo_db: "martinez_prod",
-    odoo_user: "migrador@martinez.es",
-    odoo_password: "admin",
-    created_at: "2026-05-18",
-    last_used_at: "2026-05-20",
-  },
-  {
-    id: "3",
-    name: "Textiles del Este S.A.",
-    odoo_url: "https://textiles-este.odoo.com",
-    odoo_db: "textiles_prod_db",
-    odoo_user: "consultor@este.com",
-    odoo_password: "admin",
-    created_at: "2026-05-22",
-    last_used_at: "Nunca",
-  },
-];
-
-const DEFAULT_TEMPLATES: DBTemplate[] = [
-  {
-    id: "1",
-    name: "Access Clientes Estándar",
-    source_type: "Access",
-    mapping_count: 9,
-    created_at: "2026-05-12",
-  },
-  {
-    id: "2",
-    name: "Plantilla Proveedores Sage50",
-    source_type: "Excel",
-    mapping_count: 7,
-    created_at: "2026-05-19",
-  },
-  {
-    id: "3",
-    name: "Mapeo CSV Clientes Genérico",
-    source_type: "CSV",
-    mapping_count: 8,
-    created_at: "2026-05-24",
-  },
-];
-
-// Inicializa el almacenamiento local si está vacío
-const initLocalStorage = () => {
-  if (typeof window === "undefined") return;
-  if (!localStorage.getItem("odoo_migrator_clients")) {
-    localStorage.setItem("odoo_migrator_clients", JSON.stringify(DEFAULT_CLIENTS));
+// Función auxiliar para llamar al backend Python
+async function callBackend(command: string, args: any = {}) {
+  const token = getSessionToken();
+  if (token) {
+    args.token = token;
   }
-  if (!localStorage.getItem("odoo_migrator_templates")) {
-    localStorage.setItem("odoo_migrator_templates", JSON.stringify(DEFAULT_TEMPLATES));
+  
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const jsonStr = await invoke<string>("execute_python_engine", {
+      payload: JSON.stringify({ command, args }),
+    });
+    const parsed = JSON.parse(jsonStr);
+    if (parsed.status === "error") throw new Error(parsed.error);
+    return parsed.data;
+  } else {
+    const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://127.0.0.1:8000' : '';
+    const res = await fetch(`${apiBase}/api`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, args }),
+    });
+    if (!res.ok) throw new Error("Error de conexión al motor Python");
+    const parsed = await res.json();
+    if (parsed.status === "error") throw new Error(parsed.error);
+    return parsed.data;
   }
-};
-
-initLocalStorage();
+}
 
 export const db = {
-  // CRUD de Clientes
+  // CRUD de Clientes usando la API
   async getClients(): Promise<DBClient[]> {
-    if (isTauri()) {
-      // NOTA: Cuando se active SQLite en Rust, se podrá consumir así:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // return await sqliteDb.select<DBClient[]>("SELECT * FROM clients ORDER BY created_at DESC");
+    try {
+      const data = await callBackend("db_get_clients");
+      return data.clients || [];
+    } catch (e) {
+      console.error("Error obteniendo clientes:", e);
+      return [];
     }
-    const data = localStorage.getItem("odoo_migrator_clients");
-    return data ? JSON.parse(data) : [];
   },
 
   async addClient(client: Omit<DBClient, "id" | "created_at" | "last_used_at">): Promise<DBClient> {
-    const newClient: DBClient = {
-      ...client,
-      id: Date.now().toString(),
-      created_at: new Date().toISOString().split("T")[0],
-      last_used_at: "Nunca",
-    };
-
-    if (isTauri()) {
-      // Para SQLite nativo:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // await sqliteDb.execute(
-      //   "INSERT INTO clients (id, name, odoo_url, odoo_db, odoo_user, odoo_password, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-      //   [newClient.id, newClient.name, newClient.odoo_url, newClient.odoo_db, newClient.odoo_user, newClient.odoo_password, newClient.created_at, newClient.last_used_at]
-      // );
-    }
-
-    const clients = await this.getClients();
-    clients.push(newClient);
-    localStorage.setItem("odoo_migrator_clients", JSON.stringify(clients));
-    return newClient;
+    const data = await callBackend("db_add_client", { client });
+    return data.client;
   },
 
   async deleteClient(id: string): Promise<void> {
-    if (isTauri()) {
-      // Para SQLite nativo:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // await sqliteDb.execute("DELETE FROM clients WHERE id = $1", [id]);
-    }
-
-    const clients = await this.getClients();
-    const filtered = clients.filter((c) => c.id !== id);
-    localStorage.setItem("odoo_migrator_clients", JSON.stringify(filtered));
+    await callBackend("db_delete_client", { client_id: id });
   },
 
   async updateClientLastUsed(id: string): Promise<void> {
-    if (isTauri()) {
-      // Para SQLite nativo:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // await sqliteDb.execute("UPDATE clients SET last_used_at = $1 WHERE id = $2", [new Date().toISOString().split("T")[0], id]);
+    try {
+      await callBackend("db_update_client_last_used", { client_id: id });
+    } catch (e) {
+      console.error("No se pudo actualizar last_used_at", e);
     }
-
-    const clients = await this.getClients();
-    const updated = clients.map((c) =>
-      c.id === id ? { ...c, last_used_at: new Date().toISOString().split("T")[0] } : c
-    );
-    localStorage.setItem("odoo_migrator_clients", JSON.stringify(updated));
   },
 
-  // CRUD de Plantillas
+  // CRUD de Plantillas (temporalmente en localstorage para no romper si se usaban)
   async getTemplates(): Promise<DBTemplate[]> {
-    if (isTauri()) {
-      // Para SQLite nativo:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // return await sqliteDb.select<DBTemplate[]>("SELECT * FROM templates ORDER BY created_at DESC");
-    }
     const data = localStorage.getItem("odoo_migrator_templates");
     return data ? JSON.parse(data) : [];
   },
@@ -175,17 +93,6 @@ export const db = {
       id: Date.now().toString(),
       created_at: new Date().toISOString().split("T")[0],
     };
-
-    if (isTauri()) {
-      // Para SQLite nativo:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // await sqliteDb.execute(
-      //   "INSERT INTO templates (id, name, source_type, mapping_count, created_at) VALUES ($1, $2, $3, $4, $5)",
-      //   [newTemplate.id, newTemplate.name, newTemplate.source_type, newTemplate.mapping_count, newTemplate.created_at]
-      // );
-    }
-
     const templates = await this.getTemplates();
     templates.push(newTemplate);
     localStorage.setItem("odoo_migrator_templates", JSON.stringify(templates));
@@ -193,13 +100,6 @@ export const db = {
   },
 
   async deleteTemplate(id: string): Promise<void> {
-    if (isTauri()) {
-      // Para SQLite nativo:
-      // const Database = (await import("@tauri-apps/plugin-sql")).default;
-      // const sqliteDb = await Database.load("sqlite:odoo_migrator.db");
-      // await sqliteDb.execute("DELETE FROM templates WHERE id = $1", [id]);
-    }
-
     const templates = await this.getTemplates();
     const filtered = templates.filter((t) => t.id !== id);
     localStorage.setItem("odoo_migrator_templates", JSON.stringify(filtered));

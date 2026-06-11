@@ -74,6 +74,20 @@ def main() -> None:
             handle_run_migration(args)
         elif command == "get_odoo_fields":
             handle_get_odoo_fields(args)
+        elif command == "auth_register":
+            handle_auth_register(args)
+        elif command == "auth_login":
+            handle_auth_login(args)
+        elif command == "auth_logout":
+            handle_auth_logout(args)
+        elif command == "db_get_clients":
+            handle_db_get_clients(args)
+        elif command == "db_add_client":
+            handle_db_add_client(args)
+        elif command == "db_delete_client":
+            handle_db_delete_client(args)
+        elif command == "db_update_client_last_used":
+            handle_db_update_client_last_used(args)
         else:
             respond("error", error=f"Comando desconocido: {command}")
 
@@ -360,7 +374,7 @@ def handle_preview_migration(args: dict) -> None:
             grouped_lines = None
             is_flat = False
             preview_rows_iter = None
-            if model.startswith("account.move") or model == "sale.order":
+            if model.startswith("account.move") or model == "sale.order" or model == "purchase.order":
                 grouped_lines = _preload_invoice_lines(conn, table, mapping)
                 if not grouped_lines:
                     name_col = None
@@ -452,6 +466,24 @@ def handle_preview_migration(args: dict) -> None:
                                 row_with_lines["_lines"] = []
 
                         vals = transform_sales_order(row_with_lines, mapping, format_name=options.get("format_name", True))
+                    elif model == "purchase.order":
+                        from transformers.purchases import transform_purchase_order
+                        row_with_lines = dict(row)
+                        if not is_flat:
+                            name_col = None
+                            for src_col, odoo_field in mapping.items():
+                                if odoo_field == "name":
+                                    name_col = src_col
+                                    break
+                            if name_col and grouped_lines:
+                                header_id = str(row.get(name_col, "")).strip()
+                                if header_id.endswith(".0"):
+                                    header_id = header_id[:-2]
+                                row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                            else:
+                                row_with_lines["_lines"] = []
+
+                        vals = transform_purchase_order(row_with_lines, mapping, format_name=options.get("format_name", True))
                     else:
                         raise ValueError(f"Modelo no soportado para vista previa: {model}")
                     results.append({"ok": True, "data": vals})
@@ -560,7 +592,7 @@ def handle_run_migration(args: dict) -> None:
             update_existing=opts.get("update_existing", True),
             external_id_prefix=opts.get("external_id_prefix", "inv_"),
             batch_size=int(opts.get("batch_size", 50)),
-            format_name=opts.get("format_name", True),
+                        format_name=opts.get("format_name", True),
         )
         move_type = "out_invoice" if model == "account.move" else "in_invoice"
         migrator = InvoiceMigrator(odoo, mapping, invoice_opts, move_type=move_type)
@@ -575,6 +607,17 @@ def handle_run_migration(args: dict) -> None:
             format_name=opts.get("format_name", True),
         )
         migrator = SalesOrderMigrator(odoo, mapping, sales_opts)
+    elif model == "purchase.order":
+        from migrator.purchases import MigrationOptions as PurchaseOptions, PurchaseOrderMigrator
+        purchase_opts = PurchaseOptions(
+            update_existing=opts.get("update_existing", True),
+            external_id_prefix=opts.get("external_id_prefix", None),
+            batch_size=int(opts.get("batch_size", 50)),
+            confirm_orders=opts.get("confirm_orders", True),
+            force_invoiced=opts.get("force_invoiced", False),
+            format_name=opts.get("format_name", True),
+        )
+        migrator = PurchaseOrderMigrator(odoo, mapping, purchase_opts)
     else:
         raise ValueError(f"Modelo no soportado para migración: {model}")
 
@@ -618,7 +661,7 @@ def handle_run_migration(args: dict) -> None:
             # Pre-cargar líneas si es factura o pedido
             grouped_lines = None
             is_flat = False
-            if model.startswith("account.move") or model == "sale.order":
+            if model.startswith("account.move") or model == "sale.order" or model == "purchase.order":
                 grouped_lines = _preload_invoice_lines(conn, table, mapping)
                 if not grouped_lines:
                     name_col = None
@@ -661,7 +704,7 @@ def handle_run_migration(args: dict) -> None:
 
             if not is_flat:
                 rows_iter = conn.iter_rows(table, limit=limit)
-                if model.startswith("account.move") or model == "sale.order":
+                if model.startswith("account.move") or model == "sale.order" or model == "purchase.order":
                     name_col = None
                     for src_col, odoo_field in mapping.items():
                         if odoo_field == "name":
@@ -733,6 +776,65 @@ def handle_get_odoo_fields(args: dict) -> None:
     # Ordenar por nombre del campo para comodidad
     result_fields.sort(key=lambda x: x["name"])
     respond("ok", data={"fields": result_fields})
+
+
+# ─── Handlers Base de Datos / Auth ────────────────────────────
+
+def handle_auth_register(args: dict) -> None:
+    import db_manager
+    try:
+        token = db_manager.register_user(args["email"], args["password"])
+        respond("ok", data={"token": token})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_auth_login(args: dict) -> None:
+    import db_manager
+    try:
+        token = db_manager.login_user(args["email"], args["password"])
+        respond("ok", data={"token": token})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_auth_logout(args: dict) -> None:
+    import db_manager
+    try:
+        success = db_manager.logout_user(args.get("token"))
+        respond("ok", data={"success": success})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_db_get_clients(args: dict) -> None:
+    import db_manager
+    try:
+        clients = db_manager.get_clients(args.get("token"))
+        respond("ok", data={"clients": clients})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_db_add_client(args: dict) -> None:
+    import db_manager
+    try:
+        client = db_manager.add_client(args.get("token"), args.get("client", {}))
+        respond("ok", data={"client": client})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_db_delete_client(args: dict) -> None:
+    import db_manager
+    try:
+        success = db_manager.delete_client(args.get("token"), args.get("client_id"))
+        respond("ok", data={"success": success})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_db_update_client_last_used(args: dict) -> None:
+    import db_manager
+    try:
+        success = db_manager.update_client_last_used(args.get("token"), args.get("client_id"))
+        respond("ok", data={"success": success})
+    except Exception as e:
+        respond("error", error=str(e))
 
 
 if __name__ == "__main__":

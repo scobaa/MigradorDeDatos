@@ -1,0 +1,7 @@
+{
+  "command": "auth_register",
+  "args": {
+    "email": "scoba@tecniloop.es",
+    "password": "1234"
+  }
+}

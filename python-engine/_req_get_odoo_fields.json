@@ -7,6 +7,6 @@
       "username": "export@plantillascoimbra.com",
       "password": "1234"
     },
-    "model": "sale.order"
+    "model": "purchase.order"
   }
 }

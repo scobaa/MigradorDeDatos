@@ -3,23 +3,24 @@ import Login from "./pages/Login";
 import ClientList from "./pages/ClientList";
 import MigrationWizard from "./pages/MigrationWizard";
 import Templates from "./pages/Templates";
-import { Database, Layers, LogOut, KeyRound, Menu, X, HardDrive } from "lucide-react";
+import { Database, Layers, LogOut, KeyRound, Menu, X, Cloud } from "lucide-react";
+import { useAuth } from "./lib/auth";
 
 type ActivePage = "clients" | "templates" | { type: "migrate"; clientId: string };
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const auth = useAuth();
   const [activePage, setActivePage] = useState<ActivePage>("clients");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Lock panel / Logout
+  // Logout
   const handleLogout = () => {
-    setIsLoggedIn(false);
+    auth.logout();
     setActivePage("clients");
   };
 
-  if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  if (!auth.token) {
+    return <Login onLogin={auth.login} />;
   }
 
   const renderContent = () => {
@@ -117,17 +118,17 @@ export default function App() {
         <div className="space-y-4 pt-4 border-t border-border">
           {/* Encryption status */}
           <div className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground leading-snug">
-            <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>SQLite Local Cifrado Activo</span>
+            <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>Conectado a la Nube (Seguro)</span>
           </div>
 
-          {/* Lock Panel / Logout button */}
+          {/* Logout button */}
           <button
             onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 bg-secondary/50 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 border border-border px-3.5 py-2.5 rounded-xl text-xs font-semibold transition duration-150"
           >
             <LogOut className="w-3.5 h-3.5" />
-            Bloquear Panel
+            Cerrar Sesión
           </button>
         </div>
       </aside>

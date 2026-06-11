@@ -59,6 +59,8 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
       setExternalIdPrefix("inv_in_");
     } else if (selectedModel === "sale.order") {
       setExternalIdPrefix("so_");
+    } else if (selectedModel === "purchase.order") {
+      setExternalIdPrefix("po_");
     } else if (selectedModel === "account.move.entry") {
       setExternalIdPrefix("asi_");
     }
@@ -147,7 +149,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           }
         }
       });
-    } else if (selectedModel === "sale.order") {
+    } else if (selectedModel === "sale.order" || selectedModel === "purchase.order") {
       sourceColumns.forEach((col: string) => {
         const lowerCol = col.toLowerCase();
         if (lowerCol === "codped" || lowerCol === "numped" || lowerCol === "pedido" || lowerCol === "id" || lowerCol === "name" || lowerCol === "codfac" || lowerCol === "numfac") {
@@ -235,7 +237,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         return lower === "codart" || lower === "código" || lower === "cod" || lower === "id" || lower === "referencia" || lower === "ref";
       });
       if (found) defaultExtIdCol = found;
-    } else if (selectedModel === "account.move" || selectedModel === "account.move.supplier" || selectedModel === "sale.order") {
+    } else if (selectedModel === "account.move" || selectedModel === "account.move.supplier" || selectedModel === "sale.order" || selectedModel === "purchase.order") {
       const found = sourceColumns.find((col: string) => {
         const lower = col.toLowerCase();
         return lower === "codfac" || lower === "codfrt" || lower === "codped" || lower === "numfac" || lower === "numfrt" || lower === "numped" || lower === "factura" || lower === "pedido" || lower === "id" || lower === "name";
@@ -312,6 +314,15 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         { name: "client_order_ref", label: "Referencia Cliente (client_order_ref)", required: false },
         { name: "note", label: "Notas/Observaciones (note)", required: false },
       ]);
+    } else if (selectedModel === "purchase.order") {
+      setOdooFields([
+        { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+        { name: "name", label: "Número de Pedido (name)", required: true },
+        { name: "_partner_code", label: "Código Proveedor (_partner_code)", required: true },
+        { name: "date_order", label: "Fecha del Pedido (date_order)", required: false },
+        { name: "partner_ref", label: "Referencia Proveedor (partner_ref)", required: false },
+        { name: "note", label: "Notas/Observaciones (note)", required: false },
+      ]);
     } else if (selectedModel === "account.move" || selectedModel === "account.move.supplier") {
       setOdooFields([
         { name: "__external_id", label: "ID Externo (XML ID)", required: false },
@@ -384,7 +395,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
               { name: "_line_side", label: "Indicador Lado (D/H)", required: false },
               { name: "line_ids/partner_id", label: "Partner en Apunte (Opcional)", required: false },
             ];
-          } else if (selectedModel.startsWith("account.move") || selectedModel === "sale.order") {
+          } else if (selectedModel.startsWith("account.move") || selectedModel === "sale.order" || selectedModel === "purchase.order") {
             virtualFields = [
               ...virtualFields,
               { name: "_partner_code", label: "Código Cliente/Proveedor (_partner_code)", required: true },
@@ -894,6 +905,25 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
               </div>
 
               <div
+                onClick={() => setSelectedModel("purchase.order")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "purchase.order"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Pedidos de Compra (purchase.order)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `purchase.order`. Importa pedidos a proveedores (F_PED) vinculando el proveedor y calculando el estado según su facturación.
+                  </p>
+                </div>
+              </div>
+
+              <div
                 onClick={() => setSelectedModel("account.move.entry")}
                 className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
                   selectedModel === "account.move.entry"
@@ -1230,7 +1260,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   </div>
                 </>
               )}
-              {selectedModel === "sale.order" && (
+              {(selectedModel === "sale.order" || selectedModel === "purchase.order") && (
                 <>
                   <div className="h-[1px] bg-border" />
                   <div className="flex items-center justify-between">
@@ -1284,7 +1314,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   </div>
                 </>
               )}
-              {(selectedModel === "sale.order" || selectedModel === "account.move" || selectedModel === "account.move.supplier") && (
+              {(selectedModel === "sale.order" || selectedModel === "purchase.order" || selectedModel === "account.move" || selectedModel === "account.move.supplier") && (
                 <>
                   <div className="h-[1px] bg-border" />
                   <div className="flex items-center justify-between">

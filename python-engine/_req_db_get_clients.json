@@ -1,0 +1,6 @@
+{
+  "command": "db_get_clients",
+  "args": {
+    "token": "755d462b-11f9-4992-b52b-67d2855da1a2"
+  }
+}
