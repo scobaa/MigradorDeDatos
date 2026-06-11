@@ -275,9 +275,11 @@ class PurchaseOrderMigrator:
                 if existing_id:
                     if self.options.update_existing:
                         if not dry_run:
-                            # Limpiar líneas previas para evitar duplicados al actualizar
+                            # Limpiar campos Odoo (eliminar __external_id, _lines, etc. que no pertenecen al modelo)
+                            clean_vals = self.odoo.filter_vals(PURCHASE_ORDER_MODEL, vals)
+                            
                             self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {"order_line": [(5, 0, 0)]})
-                            self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], vals)
+                            self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], clean_vals)
                             
                             # Confirmar
                             if self.options.confirm_orders:
@@ -298,7 +300,10 @@ class PurchaseOrderMigrator:
                         stats.skipped += 1
                 else:
                     if not dry_run:
-                        new_id = self.odoo.create(PURCHASE_ORDER_MODEL, vals)
+                        # Limpiar campos Odoo (eliminar __external_id, _lines, etc. que no pertenecen al modelo)
+                        clean_vals = self.odoo.filter_vals(PURCHASE_ORDER_MODEL, vals)
+                        
+                        new_id = self.odoo.create(PURCHASE_ORDER_MODEL, clean_vals)
                         self.odoo.create_xml_id(xml_id, PURCHASE_ORDER_MODEL, new_id)
                         
                         # Confirmar
