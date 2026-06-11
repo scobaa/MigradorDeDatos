@@ -16,6 +16,7 @@ echo "=============================================="
 cd "$APP_DIR"
 
 echo "[1/3] Descargando últimos cambios de GitHub..."
+git config --global --add safe.directory "$APP_DIR"
 git pull
 
 echo ""
