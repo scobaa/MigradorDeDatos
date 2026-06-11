@@ -18,9 +18,8 @@ NGINX_PORT=80
 
 echo ""
 echo "[1/6] Instalando dependencias del sistema y Node.js..."
-# Limpiar posible conflicto previo de repositorios de Node antes de hacer update
-rm -f /etc/apt/sources.list.d/nodesource.list
-rm -f /etc/apt/sources.list.d/nodesource.sources
+# Limpiar de raíz cualquier rastro antiguo de NodeSource que esté corrompiendo apt
+grep -rl nodesource /etc/apt/sources.list.d/ 2>/dev/null | xargs rm -f
 rm -f /usr/share/keyrings/nodesource*
 
 apt-get update -q
