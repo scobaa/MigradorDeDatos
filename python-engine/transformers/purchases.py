@@ -27,9 +27,9 @@ def transform_purchase_line(line_row: dict[str, Any]) -> dict[str, Any]:
                 product_code = product_code[:-2]
         elif kl in ("deslpe", "deslfa", "deslpp", "descripcion", "description", "name", "nombre", "order_ids/name", "invoice_line_ids/name", "order_line/name"):
             description = clean_str(v) or description
-        elif kl in ("canlpe", "canlfa", "canlpp", "cantidad", "quantity", "qty", "unidades", "order_ids/product_qty", "invoice_line_ids/quantity", "order_line/product_qty"):
+        elif kl in ("canlpe", "canlfa", "canlpp", "cantidad", "quantity", "qty", "unidades", "order_ids/product_uom_qty", "order_ids/product_qty", "invoice_line_ids/quantity", "order_line/product_qty", "order_line/product_uom_qty"):
             quantity = clean_float(v)
-        elif kl in ("prelpe", "prelfa", "prelpp", "precio", "price", "price_unit", "importe", "order_ids/price_unit", "invoice_line_ids/price_unit", "order_line/price_unit"):
+        elif kl in ("prelpe", "prelfa", "prelpp", "precio", "price", "price_unit", "importe", "order_ids/price", "order_ids/price_unit", "invoice_line_ids/price_unit", "order_line/price_unit", "order_line/price"):
             price_unit = clean_float(v)
         elif kl in ("descuento", "dto", "dtolpp", "dtolpe", "dtolfa", "discount", "order_ids/discount", "invoice_line_ids/discount"):
             discount = clean_float(v)
