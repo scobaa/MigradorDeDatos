@@ -16,21 +16,24 @@ def transform_sales_line(line_row: dict[str, Any]) -> dict[str, Any]:
     description = "Línea de pedido"
     quantity = 1.0
     price_unit = 0.0
+    discount = 0.0
     tax_value = None
 
     for k, v in line_row.items():
         kl = k.lower()
-        if kl in ("artlpe", "artlfa", "articulo", "product", "sku", "code", "referencia", "ref"):
+        if kl in ("artlpe", "artlfa", "articulo", "product", "sku", "code", "referencia", "ref", "order_ids/product_id", "invoice_line_ids/product_id"):
             product_code = clean_str(v)
             if product_code and product_code.endswith(".0"):
                 product_code = product_code[:-2]
-        elif kl in ("deslpe", "deslfa", "descripcion", "description", "name", "nombre"):
+        elif kl in ("deslpe", "deslfa", "descripcion", "description", "name", "nombre", "order_ids/name", "invoice_line_ids/name"):
             description = clean_str(v) or description
-        elif kl in ("canlpe", "canlfa", "cantidad", "quantity", "qty", "unidades"):
+        elif kl in ("canlpe", "canlfa", "cantidad", "quantity", "qty", "unidades", "order_ids/product_uom_qty", "invoice_line_ids/quantity"):
             quantity = clean_float(v)
-        elif kl in ("prelpe", "prelfa", "precio", "price", "price_unit", "importe"):
+        elif kl in ("prelpe", "prelfa", "precio", "price", "price_unit", "importe", "order_ids/price", "order_ids/price_unit", "invoice_line_ids/price_unit"):
             price_unit = clean_float(v)
-        elif kl in ("ivalpe", "ivalfa", "iva", "tax", "pct", "porcentaje"):
+        elif kl in ("descuento", "dto", "discount", "order_ids/discount", "invoice_line_ids/discount"):
+            discount = clean_float(v)
+        elif kl in ("ivalpe", "ivalfa", "iva", "tax", "pct", "porcentaje", "order_ids/tax_id", "invoice_line_ids/tax_ids", "order_ids/tax_id/id"):
             tax_value = clean_str(v)
             if tax_value and tax_value.endswith(".0"):
                 tax_value = tax_value[:-2]
@@ -40,6 +43,7 @@ def transform_sales_line(line_row: dict[str, Any]) -> dict[str, Any]:
         "name": description,
         "quantity": quantity,
         "price_unit": price_unit,
+        "discount": discount,
         "tax_value": tax_value,
     }
 
@@ -47,6 +51,7 @@ def transform_sales_line(line_row: dict[str, Any]) -> dict[str, Any]:
 def transform_sales_order(
     row: dict[str, Any],
     mapping: dict[str, str],
+    format_name: bool = True,
 ) -> dict[str, Any]:
     """
     Transforma la cabecera y las líneas de un pedido al esquema de Odoo.
@@ -77,7 +82,7 @@ def transform_sales_order(
 
     if not vals.get("name"):
         vals["name"] = "/"
-    else:
+    elif format_name:
         # Formatear el nombre con el año, serie y número
         # Formato: SO/YEAR/SERIES/NUMBER
         year = "2026"

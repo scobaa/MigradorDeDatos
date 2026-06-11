@@ -1,0 +1,45 @@
+{
+  "command": "run_migration",
+  "args": {
+    "model": "sale.order",
+    "odoo": {
+      "url": "https://staging-plantillas-coimbra-0306.cloudpepper.site/",
+      "db": "staging-plantillas-coimbra-0306.cloudpepper.site",
+      "username": "export@plantillascoimbra.com",
+      "password": "1234"
+    },
+    "path": "C:\\Users\\scoba\\Downloads\\Copia de FV2021_COIMBRA (2).xlsx",
+    "table": "pedidos",
+    "mapping": {
+      "ID": "__external_id",
+      "NAME": "name",
+      "FECHA": "date_order",
+      "PARTNER_ID/ID": "_partner_code",
+      "ORDER_IDS/ID": "",
+      "Unnamed: 5": "",
+      "ORDER_IDS/NAME": "",
+      "ORDER_IDS/PRODUCT_UOM_QTY": "",
+      "ORDER_IDS/PRICE": "",
+      "ORDER_IDS/DISCOUNT": "",
+      "Unnamed: 10": "",
+      "ORDER_IDS/PRODUCT_ID": ""
+    },
+    "options": {
+      "default_country": "ES",
+      "customer_rank": 0,
+      "supplier_rank": 1,
+      "infer_company": true,
+      "update_existing": true,
+      "ref_prefix": "",
+      "external_id_prefix": "",
+      "external_id_column": "ID",
+      "categories_table": "",
+      "batch_size": 100,
+      "confirm_orders": true,
+      "force_invoiced": true,
+      "post_entries": true,
+      "format_name": false
+    },
+    "dry_run": false
+  }
+}

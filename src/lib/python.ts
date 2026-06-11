@@ -23,14 +23,23 @@ const isTauri = () => {
  * @param command Nombre del comando a ejecutar (ej: 'test_connection')
  * @param args Argumentos que se pasarán serializados como JSON
  */
+// Cuando la app se sirve desde un servidor remoto (nginx), el motor Python
+// está accesible en /api (relativo). En desarrollo local sigue siendo localhost.
+const getPythonApiUrl = () => {
+  const hostname = window.location.hostname;
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+  return isLocal ? 'http://127.0.0.1:8000/api' : '/api';
+};
+
 export async function callPython<T = any>(
   command: string,
   args: any = {}
 ): Promise<PythonResponse<T>> {
   if (!isTauri()) {
-    console.log(`Intentando conectar con el servidor Python local en http://127.0.0.1:8000/api para '${command}'...`);
+    const apiUrl = getPythonApiUrl();
+    console.log(`Intentando conectar con el motor Python en ${apiUrl} para '${command}'...`);
     try {
-      const response = await fetch("http://127.0.0.1:8000/api", {
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -42,9 +51,8 @@ export async function callPython<T = any>(
       }
     } catch (e) {
       console.warn(
-        `No se pudo contactar con el servidor local de Python (¿no está corriendo?).\n` +
-        `Para usar tus archivos locales y conectar a Odoo en modo navegador, ejecuta:\n` +
-        `  python python-engine/server.py\n` +
+        `No se pudo contactar con el motor Python (${apiUrl}).\n` +
+        `En modo local, ejecuta: python python-engine/server.py\n` +
         `Usando datos de simulación por defecto.`
       );
     }

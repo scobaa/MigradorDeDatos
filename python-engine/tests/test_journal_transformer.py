@@ -116,7 +116,8 @@ def test_transform_journal_entry():
     
     vals = transform_journal_entry(row, mapping)
     assert vals["move_type"] == "entry"
-    assert vals["name"] == "1"
+    assert vals["name"] == "IMPOR/2026/01/00001"
+    assert vals["__external_id"] == "asi_2026_01_1"
     assert vals["date"] == "2026-05-27"
     assert vals["ref"] == "DOC-99"
     assert vals["journal_id"] == "01"
@@ -134,3 +135,52 @@ def test_transform_journal_entry():
     assert lines[2]["_account_code"] == "47700000"
     assert lines[2]["debit"] == 0.0
     assert lines[2]["credit"] == 21.0
+
+
+def test_transform_journal_line_amount_only_no_side():
+    mapping = {
+        "CUEAPU": "line_ids/account_id",
+        "CONAPU": "line_ids/name",
+        "IMP": "_line_amount",
+    }
+
+    # Positive amount -> Debit
+    row_pos = {
+        "CUEAPU": "43000028",
+        "CONAPU": "Apunte Debe",
+        "IMP": "350.50",
+    }
+    vals_pos = transform_journal_line(row_pos, mapping)
+    assert vals_pos["debit"] == 350.50
+    assert vals_pos["credit"] == 0.0
+
+    # Negative amount -> Credit
+    row_neg = {
+        "CUEAPU": "70000000",
+        "CONAPU": "Apunte Haber",
+        "IMP": "-120.00",
+    }
+    vals_neg = transform_journal_line(row_neg, mapping)
+    assert vals_neg["debit"] == 0.0
+    assert vals_neg["credit"] == 120.0
+
+
+def test_transform_journal_line_case_insensitive():
+    # El archivo origen tiene nombres con mayúsculas/minúsculas o espacios mezclados
+    row = {
+        "  cueapu  ": "43000028",
+        "ConApu": "Concepto mixto",
+        "ImeApu": "250.00",
+        "D-HAPU ": "D",
+    }
+    mapping = {
+        "cueapu": "line_ids/account_id",
+        "conapu": "line_ids/name",
+        "imeapu": "_line_amount",
+        "d-hapu": "_line_side",
+    }
+    vals = transform_journal_line(row, mapping)
+    assert vals["_account_code"] == "43000028"
+    assert vals["name"] == "Concepto mixto"
+    assert vals["debit"] == 250.0
+    assert vals["credit"] == 0.0

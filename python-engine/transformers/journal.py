@@ -49,6 +49,19 @@ def clean_date(value: Any) -> str | None:
     return text[:10] if len(text) >= 10 else None
 
 
+def get_val_case_insensitive(row: dict[str, Any], col_name: str) -> Any:
+    """Obtiene el valor de una columna de forma insensible a mayúsculas/minúsculas y espacios."""
+    if not col_name:
+        return None
+    if col_name in row:
+        return row[col_name]
+    col_clean = str(col_name).strip().lower()
+    for k, v in row.items():
+        if str(k).strip().lower() == col_clean:
+            return v
+    return None
+
+
 def transform_journal_line(line_row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
     """
     Normaliza y limpia una línea/apunte de asiento contable.
@@ -67,7 +80,7 @@ def transform_journal_line(line_row: dict[str, Any], mapping: dict[str, str]) ->
     for src_col, odoo_field in mapping.items():
         if not odoo_field:
             continue
-        val = line_row.get(src_col)
+        val = get_val_case_insensitive(line_row, src_col)
 
         if odoo_field == "line_ids/account_id":
             account_code = clean_str(val)
@@ -88,19 +101,28 @@ def transform_journal_line(line_row: dict[str, Any], mapping: dict[str, str]) ->
         elif odoo_field == "_line_side":
             side_col = src_col
 
-    # Si se especificó el modo de importe único + lado (ej: IMEAPU y D-HAPU)
-    if amount_col is not None and side_col is not None:
-        amount_val = clean_float(line_row.get(amount_col))
-        side_val = str(line_row.get(side_col) or "").strip().upper()
-        # Interpretación del lado: Debe (D, DEBE, DEBIT, 1, +) / Haber (H, HABER, CREDIT, 2, -)
-        if side_val in ("D", "DEBE", "DEBIT", "1", "+"):
-            debit = amount_val
-            credit = 0.0
-        elif side_val in ("H", "HABER", "CREDIT", "2", "-"):
-            credit = amount_val
-            debit = 0.0
+    # Si se especificó el modo de importe único (ej: IMEAPU)
+    if amount_col is not None:
+        amount_val = clean_float(get_val_case_insensitive(line_row, amount_col))
+        if side_col is not None:
+            side_val = str(get_val_case_insensitive(line_row, side_col) or "").strip().upper()
+            # Interpretación del lado: Debe (D, DEBE, DEBIT, 1, +) / Haber (H, HABER, CREDIT, 2, -)
+            if side_val in ("D", "DEBE", "DEBIT", "1", "+"):
+                debit = amount_val
+                credit = 0.0
+            elif side_val in ("H", "HABER", "CREDIT", "2", "-"):
+                credit = amount_val
+                debit = 0.0
+            else:
+                # Fallback en caso de que el valor no sea claro: si es positivo va al debe
+                if amount_val >= 0:
+                    debit = amount_val
+                    credit = 0.0
+                else:
+                    debit = 0.0
+                    credit = abs(amount_val)
         else:
-            # Fallback en caso de que el valor no sea claro: si es positivo va al debe
+            # Fallback si no se especificó columna de lado: si es positivo va al debe, si es negativo al haber
             if amount_val >= 0:
                 debit = amount_val
                 credit = 0.0
@@ -129,7 +151,7 @@ def transform_journal_entry(row: dict[str, Any], mapping: dict[str, str]) -> dic
     for source_col, odoo_field in mapping.items():
         if not odoo_field or odoo_field.startswith("line_ids/") or odoo_field.startswith("_line_"):
             continue
-        raw = row.get(source_col)
+        raw = get_val_case_insensitive(row, source_col)
         if raw is None:
             continue
 
@@ -140,7 +162,30 @@ def transform_journal_entry(row: dict[str, Any], mapping: dict[str, str]) -> dic
             if cleaned is not None:
                 vals[odoo_field] = cleaned
 
-    if not vals.get("name"):
+    # Formatear el nombre del asiento y el ID externo de forma estructurada: IMPOR/AÑO/DIARIO/ASIENTO_PAD
+    entry_number = vals.get("name")
+    if entry_number and entry_number != "/":
+        # Extraer el año de la fecha
+        year = "2025"  # Fallback por defecto
+        if vals.get("date"):
+            match = re.match(r"^(\d{4})", vals["date"])
+            if match:
+                year = match.group(1)
+        
+        # Obtener el diario
+        journal_code = str(vals.get("journal_id") or "1").strip()
+        
+        # Rellenar con ceros a 5 dígitos si el número es numérico
+        entry_str = str(entry_number).strip()
+        if entry_str.endswith(".0"):
+            entry_str = entry_str[:-2]
+        
+        entry_padded = entry_str.zfill(5) if entry_str.isdigit() else entry_str
+        
+        # Generar nombre estructurado e ID externo
+        vals["name"] = f"IMPOR/{year}/{journal_code}/{entry_padded}"
+        vals["__external_id"] = f"asi_{year}_{journal_code}_{entry_str}"
+    else:
         vals["name"] = "/"
 
     # 2. Mapear líneas

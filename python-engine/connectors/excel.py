@@ -70,7 +70,7 @@ class ExcelConnector:
         if table not in excel.sheet_names:
             raise ValueError(f"La hoja '{table}' no existe en el archivo Excel")
         
-        df = pd.read_excel(self.path, sheet_name=table, usecols=[0])
+        df = pd.read_excel(self.path, sheet_name=table)
         return len(df)
 
     def iter_rows(
@@ -92,11 +92,14 @@ class ExcelConnector:
         if limit:
             df = df.head(limit)
 
-        # Convertir NaN/NaT a None para JSON
-        df = df.where(pd.notnull(df), None)
-
-        for _, row in df.iterrows():
-            yield row.to_dict()
+        for row in df.to_dict(orient="records"):
+            clean_row = {}
+            for k, v in row.items():
+                if pd.isna(v):
+                    clean_row[k] = None
+                else:
+                    clean_row[k] = v
+            yield clean_row
 
     def read_table(
         self, table: str, columns: list[str] | None = None, limit: int | None = None

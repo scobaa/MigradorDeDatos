@@ -57,21 +57,24 @@ def transform_invoice_line(line_row: dict[str, Any]) -> dict[str, Any]:
     description = "Línea de factura"
     quantity = 1.0
     price_unit = 0.0
+    discount = 0.0
     tax_value = None
 
     for k, v in line_row.items():
         kl = k.lower()
-        if kl in ("artlfa", "artlfr", "articulo", "product", "sku", "code", "referencia", "ref"):
+        if kl in ("artlfa", "artlfr", "articulo", "product", "sku", "code", "referencia", "ref", "order_ids/product_id", "invoice_line_ids/product_id"):
             product_code = clean_str(v)
             if product_code and product_code.endswith(".0"):
                 product_code = product_code[:-2]
-        elif kl in ("deslfa", "deslfr", "descripcion", "description", "name", "nombre"):
+        elif kl in ("deslfa", "deslfr", "descripcion", "description", "name", "nombre", "order_ids/name", "invoice_line_ids/name"):
             description = clean_str(v) or description
-        elif kl in ("canlfa", "canlfr", "cantidad", "quantity", "qty", "unidades"):
+        elif kl in ("canlfa", "canlfr", "cantidad", "quantity", "qty", "unidades", "order_ids/product_uom_qty", "invoice_line_ids/quantity"):
             quantity = clean_float(v)
-        elif kl in ("prelfa", "prelfr", "precio", "price", "price_unit", "importe"):
+        elif kl in ("prelfa", "prelfr", "precio", "price", "price_unit", "importe", "order_ids/price", "order_ids/price_unit", "invoice_line_ids/price_unit"):
             price_unit = clean_float(v)
-        elif kl in ("ivalfa", "ivalfr", "iva", "tax", "pct", "porcentaje"):
+        elif kl in ("descuento", "dto", "discount", "order_ids/discount", "invoice_line_ids/discount"):
+            discount = clean_float(v)
+        elif kl in ("ivalfa", "ivalfr", "iva", "tax", "pct", "porcentaje", "order_ids/tax_id", "invoice_line_ids/tax_ids", "order_ids/tax_id/id"):
             tax_value = clean_str(v)
             if tax_value and tax_value.endswith(".0"):
                 tax_value = tax_value[:-2]
@@ -81,6 +84,7 @@ def transform_invoice_line(line_row: dict[str, Any]) -> dict[str, Any]:
         "name": description,
         "quantity": quantity,
         "price_unit": price_unit,
+        "discount": discount,
         "tax_value": tax_value,
     }
 
@@ -126,6 +130,7 @@ def transform_invoice(
     row: dict[str, Any],
     mapping: dict[str, str],
     move_type: str = "out_invoice",
+    format_name: bool = True,
 ) -> dict[str, Any]:
     """
     Transforma la cabecera y las líneas de una factura al esquema de Odoo.
@@ -157,7 +162,7 @@ def transform_invoice(
     if not vals.get("name"):
         # Generar un nombre temporal si no viene número de factura mapeado
         vals["name"] = "/"
-    else:
+    elif format_name:
         # Formatear el nombre para incluir prefijo, año, serie y número
         # Formato: PREFIX/YEAR/SERIES/NUMBER, ej: SO/2026/1/982
         year = "2026"

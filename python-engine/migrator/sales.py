@@ -26,6 +26,8 @@ class MigrationOptions:
     batch_size: int = 50
     external_id_prefix: str = "so_"
     confirm_orders: bool = True
+    force_invoiced: bool = False
+    format_name: bool = True
 
 
 @dataclass
@@ -87,7 +89,7 @@ class SalesOrderMigrator:
 
         try:
             # 1. Buscar por XML ID (los pedidos siempre vinculan res.partner clientes)
-            xml_id = f"cli_{key}"
+            xml_id = key if key.startswith("cli_") else f"cli_{key}"
             partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
             if partner_id:
                 self._partner_cache[key] = partner_id
@@ -127,7 +129,7 @@ class SalesOrderMigrator:
                 return ids[0]
 
             # 2. Buscar por XML ID de product.template
-            xml_id = f"art_{key}"
+            xml_id = key if key.startswith("art_") else f"art_{key}"
             tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
             if tmpl_id:
                 p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
@@ -193,7 +195,7 @@ class SalesOrderMigrator:
 
     def _process_row(self, row: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         """Transforma una fila cruda y resuelve sus relaciones in-place."""
-        vals = transform_sales_order(row, self.mapping)
+        vals = transform_sales_order(row, self.mapping, format_name=self.options.format_name)
 
         # 1. Resolver partner
         partner_code = vals.pop("_partner_code", None)
@@ -217,6 +219,8 @@ class SalesOrderMigrator:
                 "product_uom_qty": line["quantity"],
                 "price_unit": line["price_unit"],
             }
+            if "discount" in line:
+                line_vals["discount"] = line["discount"]
             if product_id:
                 line_vals["product_id"] = product_id
 
@@ -257,9 +261,15 @@ class SalesOrderMigrator:
                 if not name or name == "/":
                     raise ValueError("El código de pedido original (campo 'name') es obligatorio.")
 
-                # Generar XML ID único para el pedido
+                # Generar XML ID único para el pedido usando el prefijo configurado
+                # NOTA: usamos comparación explícita con None para que prefijo "" (vacío) también funcione
+                prefix = self.options.external_id_prefix if self.options.external_id_prefix is not None else "so_"
                 clean_name = clean_xml_id(name)
-                xml_id = f"so_{clean_name}"
+                # Solo añadir prefijo si no está ya incluido en el nombre limpio
+                if prefix and not clean_name.startswith(prefix):
+                    xml_id = f"{prefix}{clean_name}"
+                else:
+                    xml_id = clean_name
 
                 # 2. Comprobar si ya existe
                 existing_id = self.odoo.get_xml_id_res_id(xml_id, SALES_ORDER_MODEL)
@@ -299,8 +309,24 @@ class SalesOrderMigrator:
                         if self.options.confirm_orders:
                             try:
                                 self.odoo.execute(SALES_ORDER_MODEL, "action_confirm", [existing_id])
+                                # Restaurar la fecha original ya que action_confirm la sobrescribe con la actual
+                                if "date_order" in clean_vals:
+                                    self.odoo.write(SALES_ORDER_MODEL, [existing_id], {"date_order": clean_vals["date_order"]})
+                                # Marcar como facturado si está activa la opción
+                                if self.options.force_invoiced:
+                                    try:
+                                        self.odoo.write(SALES_ORDER_MODEL, [existing_id], {"force_invoiced": True})
+                                    except Exception as e_fi:
+                                        log.warning("No se pudo marcar force_invoiced en pedido '%s': %s", name, e_fi)
                             except Exception as e:
-                                log.debug("Excepción silenciada en action_confirm: %s", e)
+                                log.warning("[CONFIRM FALLIDO] Pedido '%s' (fila %s) no se pudo confirmar: %s", name, row_idx, e)
+                                _emit_progress({
+                                    "done": row_idx,
+                                    "total": total,
+                                    "action": "warning",
+                                    "name": name,
+                                    "message": f"Pedido '{name}' actualizado pero NO confirmado: {e}",
+                                })
 
                     stats.updated += 1
                     _emit_progress({
@@ -321,8 +347,24 @@ class SalesOrderMigrator:
                         if self.options.confirm_orders:
                             try:
                                 self.odoo.execute(SALES_ORDER_MODEL, "action_confirm", [new_id])
+                                # Restaurar la fecha original ya que action_confirm la sobrescribe con la actual
+                                if "date_order" in clean_vals:
+                                    self.odoo.write(SALES_ORDER_MODEL, [new_id], {"date_order": clean_vals["date_order"]})
+                                # Marcar como facturado si está activa la opción
+                                if self.options.force_invoiced:
+                                    try:
+                                        self.odoo.write(SALES_ORDER_MODEL, [new_id], {"force_invoiced": True})
+                                    except Exception as e_fi:
+                                        log.warning("No se pudo marcar force_invoiced en pedido '%s': %s", name, e_fi)
                             except Exception as e:
-                                log.debug("Excepción silenciada en action_confirm: %s", e)
+                                log.warning("[CONFIRM FALLIDO] Pedido '%s' (fila %s) no se pudo confirmar: %s", name, row_idx, e)
+                                _emit_progress({
+                                    "done": row_idx,
+                                    "total": total,
+                                    "action": "warning",
+                                    "name": name,
+                                    "message": f"Pedido '{name}' creado pero NO confirmado: {e}",
+                                })
 
                     stats.created += 1
                     _emit_progress({
@@ -333,12 +375,29 @@ class SalesOrderMigrator:
                     })
 
             except Exception as e:
-                log.exception("Error procesando pedido en fila %s", row_idx)
-                stats.errors.append({"row": row_idx, "error": str(e), "data": row})
+                log.exception("Error procesando pedido '%s' en fila %s", vals.get("name", "desconocido") if 'vals' in dir() else "desconocido", row_idx)
+                error_name = None
+                try:
+                    # Intentar sacar el nombre del pedido de la fila original para facilitar búsqueda
+                    for src_col, odoo_field in self.mapping.items():
+                        if odoo_field == "name":
+                            error_name = str(row.get(src_col, "")).strip()
+                            if error_name.endswith(".0"):
+                                error_name = error_name[:-2]
+                            break
+                except Exception:
+                    pass
+                stats.errors.append({
+                    "row": row_idx,
+                    "name": error_name or f"fila_{row_idx}",
+                    "error": str(e),
+                    "data": row,
+                })
                 _emit_progress({
                     "done": row_idx,
                     "total": total,
                     "action": "error",
+                    "name": error_name,
                     "message": str(e),
                 })
 

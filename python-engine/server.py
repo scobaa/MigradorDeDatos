@@ -57,9 +57,17 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
             # Validar que sea JSON
             payload = json.loads(post_data.decode("utf-8"))
             
+            # Guardar el payload según el comando para depuración
+            engine_dir = os.path.dirname(os.path.abspath(__file__))
+            try:
+                cmd_name = payload.get("command", "unknown")
+                with open(os.path.join(engine_dir, f"_req_{cmd_name}.json"), "w", encoding="utf-8") as req_file:
+                    json.dump(payload, req_file, ensure_ascii=False, indent=2)
+            except Exception as write_err:
+                sys.stderr.write(f"No se pudo escribir _req: {write_err}\n")
+            
             # Ejecutar main.py como subproceso
             # Buscamos el ejecutable de Python del venv si existe
-            engine_dir = os.path.dirname(os.path.abspath(__file__))
             venv_python = os.path.join(engine_dir, ".venv", "Scripts", "python.exe") if sys.platform == "win32" else os.path.join(engine_dir, ".venv", "bin", "python")
             
             python_exe = venv_python if os.path.exists(venv_python) else sys.executable
@@ -79,15 +87,19 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
             process.stdin.write(json.dumps(payload))
             process.stdin.close()
 
-            # Leer y volcar stderr en tiempo real a la consola del servidor usando un hilo separado
+            # Leer y volcar stderr en tiempo real a la consola del servidor y a un archivo de log
             import threading
+            log_file_path = os.path.join(engine_dir, "migration_debug.log")
             def log_stderr(pipe):
                 try:
-                    for line in iter(pipe.readline, ""):
-                        sys.stderr.write(line)
-                        sys.stderr.flush()
-                        global LOG_QUEUE
-                        LOG_QUEUE.append(line.strip())
+                    with open(log_file_path, "a", encoding="utf-8") as log_file:
+                        for line in iter(pipe.readline, ""):
+                            sys.stderr.write(line)
+                            sys.stderr.flush()
+                            global LOG_QUEUE
+                            LOG_QUEUE.append(line.strip())
+                            log_file.write(line)
+                            log_file.flush()
                 except Exception:
                     pass
 

@@ -34,7 +34,9 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
   const [logs, setLogs] = useState<string[]>([]);
   const [batchSize, setBatchSize] = useState(100);
   const [confirmOrders, setConfirmOrders] = useState(true);
+  const [forceInvoiced, setForceInvoiced] = useState(false);
   const [postEntries, setPostEntries] = useState(true);
+  const [formatName, setFormatName] = useState(true);
   const [migrationStats, setMigrationStats] = useState<{
     created: number;
     updated: number;
@@ -73,8 +75,10 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
 
     const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
     if (!isTauri) {
-      // Check local Python HTTP server connection status
-      fetch("http://127.0.0.1:8000/api", {
+      // Check Python server connection status (relativo en servidor, localhost en dev)
+      const hostname = window.location.hostname;
+      const apiBase = (hostname === 'localhost' || hostname === '127.0.0.1') ? 'http://127.0.0.1:8000' : '';
+      fetch(`${apiBase}/api`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command: "test_connection", args: { url: "", db: "", username: "", password: "" } }),
@@ -86,6 +90,175 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     }
   }, [clientId]);
 
+  // Recalcular mapeo inicial, ID externo y tabla de familias de forma reactiva al cambiar modelo o columnas
+  useEffect(() => {
+    if (sourceColumns.length === 0) return;
+
+    const initialMappings: Record<string, string> = {};
+    if (selectedModel === "product.template") {
+      sourceColumns.forEach((col: string) => {
+        const lowerCol = col.toLowerCase();
+        if (lowerCol === "codart" || lowerCol === "código" || lowerCol === "cod" || lowerCol === "id" || lowerCol === "referencia" || lowerCol === "ref" || lowerCol === "default_code") {
+          initialMappings[col] = "default_code";
+        } else if (lowerCol === "eanart" || lowerCol === "codbar" || lowerCol === "barcode" || lowerCol.includes("ean") || lowerCol.includes("barra")) {
+          initialMappings[col] = "barcode";
+        } else if (lowerCol === "desart" || lowerCol === "nomart" || lowerCol.includes("nombre") || lowerCol.includes("descrip") || lowerCol === "name") {
+          initialMappings[col] = "name";
+        } else if (lowerCol === "pcoart" || lowerCol.includes("coste") || lowerCol.includes("costo") || lowerCol === "cost") {
+          initialMappings[col] = "standard_price";
+        } else if (lowerCol === "pvpart" || lowerCol.includes("venta") || lowerCol.includes("pvp") || lowerCol === "price" || lowerCol === "list_price") {
+          initialMappings[col] = "list_price";
+        } else if (lowerCol === "famart" || lowerCol.includes("familia") || lowerCol.includes("categor") || lowerCol === "category") {
+          initialMappings[col] = "_category";
+        } else {
+          initialMappings[col] = "";
+        }
+      });
+    } else if (selectedModel === "account.move" || selectedModel === "account.move.supplier") {
+      sourceColumns.forEach((col: string) => {
+        const lowerCol = col.toLowerCase();
+        if (selectedModel === "account.move") {
+          if (lowerCol === "codfac" || lowerCol === "numfac" || lowerCol === "factura" || lowerCol === "id" || lowerCol === "name") {
+            initialMappings[col] = "name";
+          } else if (lowerCol === "fecfac" || lowerCol === "fecha" || lowerCol === "invoice_date") {
+            initialMappings[col] = "invoice_date";
+          } else if (lowerCol === "clifac" || lowerCol === "codcli" || lowerCol === "cliente" || lowerCol === "_partner_code" || lowerCol === "partner_id/id") {
+            initialMappings[col] = "_partner_code";
+          } else if (lowerCol === "obsfac" || lowerCol === "observaciones" || lowerCol === "narration" || lowerCol === "obs") {
+            initialMappings[col] = "narration";
+          } else if (lowerCol === "reffac" || lowerCol === "referencia" || lowerCol === "ref") {
+            initialMappings[col] = "ref";
+          } else {
+            initialMappings[col] = "";
+          }
+        } else {
+          if (lowerCol === "codfrt" || lowerCol === "numfrt" || lowerCol === "factura" || lowerCol === "id" || lowerCol === "name") {
+            initialMappings[col] = "name";
+          } else if (lowerCol === "fecfrt" || lowerCol === "fecha" || lowerCol === "invoice_date") {
+            initialMappings[col] = "invoice_date";
+          } else if (lowerCol === "profrt" || lowerCol === "codpro" || lowerCol === "proveedor" || lowerCol === "_partner_code" || lowerCol === "partner_id/id") {
+            initialMappings[col] = "_partner_code";
+          } else if (lowerCol === "obsfrt" || lowerCol === "observaciones" || lowerCol === "narration" || lowerCol === "obs") {
+            initialMappings[col] = "narration";
+          } else if (lowerCol === "reffrt" || lowerCol === "referencia" || lowerCol === "ref") {
+            initialMappings[col] = "ref";
+          } else {
+            initialMappings[col] = "";
+          }
+        }
+      });
+    } else if (selectedModel === "sale.order") {
+      sourceColumns.forEach((col: string) => {
+        const lowerCol = col.toLowerCase();
+        if (lowerCol === "codped" || lowerCol === "numped" || lowerCol === "pedido" || lowerCol === "id" || lowerCol === "name" || lowerCol === "codfac" || lowerCol === "numfac") {
+          initialMappings[col] = "name";
+        } else if (lowerCol === "fecped" || lowerCol === "fecha" || lowerCol === "date_order" || lowerCol === "fecfac") {
+          initialMappings[col] = "date_order";
+        } else if (lowerCol === "cliped" || lowerCol === "codcli" || lowerCol === "cliente" || lowerCol === "_partner_code" || lowerCol === "clifac" || lowerCol === "partner_id/id") {
+          initialMappings[col] = "_partner_code";
+        } else if (lowerCol === "obsped" || lowerCol === "observaciones" || lowerCol === "note" || lowerCol === "obs" || lowerCol === "obsfac") {
+          initialMappings[col] = "note";
+        } else if (lowerCol === "refped" || lowerCol === "referencia" || lowerCol === "ref") {
+          initialMappings[col] = "client_order_ref";
+        } else {
+          initialMappings[col] = "";
+        }
+      });
+    } else if (selectedModel === "account.move.entry") {
+      sourceColumns.forEach((col: string) => {
+        const lowerCol = col.toLowerCase();
+        if (lowerCol === "asiapu" || lowerCol === "asiento" || lowerCol === "id" || lowerCol === "name" || lowerCol === "nº asiento" || lowerCol === "nºasiento" || lowerCol === "num_asiento" || lowerCol === "número asiento" || lowerCol === "num. asiento") {
+          initialMappings[col] = "name";
+        } else if (lowerCol === "fecapu" || lowerCol === "fecha" || lowerCol === "date" || lowerCol === "fecha apunte" || lowerCol === "fecha_apunte" || lowerCol === "fec_apunte") {
+          initialMappings[col] = "date";
+        } else if (lowerCol === "docapu" || lowerCol === "documento" || lowerCol === "referencia" || lowerCol === "ref" || lowerCol === "num_documento" || lowerCol === "nº documento") {
+          initialMappings[col] = "ref";
+        } else if (lowerCol === "diaapu" || lowerCol === "diario" || lowerCol === "journal" || lowerCol === "diario contable" || lowerCol === "diario_contable") {
+          initialMappings[col] = "journal_id";
+        } else if (lowerCol === "cueapu" || lowerCol === "cuenta" || lowerCol === "account" || lowerCol === "cuenta contable" || lowerCol === "cuenta_contable" || lowerCol === "subcuenta") {
+          initialMappings[col] = "line_ids/account_id";
+        } else if (lowerCol === "conapu" || lowerCol === "concepto" || lowerCol === "glosa" || lowerCol === "descrip" || lowerCol === "descripción" || lowerCol === "descripcion" || lowerCol === "concepto apunte" || lowerCol === "concepto_apunte" || lowerCol === "detalle") {
+          initialMappings[col] = "line_ids/name";
+        } else if (lowerCol === "debe" || lowerCol === "debit" || lowerCol === "deb") {
+          initialMappings[col] = "line_ids/debit";
+        } else if (lowerCol === "haber" || lowerCol === "credit" || lowerCol === "hab" || lowerCol === "cre") {
+          initialMappings[col] = "line_ids/credit";
+        } else if (lowerCol === "imeapu" || lowerCol === "importe" || lowerCol === "monto" || lowerCol === "amount" || lowerCol === "importe_apunte" || lowerCol === "importe apunte" || lowerCol === "valor") {
+          initialMappings[col] = "_line_amount";
+        } else if (lowerCol === "d-hapu" || lowerCol === "dh" || lowerCol === "debe_haber" || lowerCol === "lado" || lowerCol === "side" || lowerCol === "d/h" || lowerCol === "debe/haber") {
+          initialMappings[col] = "_line_side";
+        } else {
+          initialMappings[col] = "";
+        }
+      });
+    } else {
+      sourceColumns.forEach((col: string) => {
+        const lowerCol = col.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (lowerCol === "codcli" || lowerCol === "codpro" || lowerCol === "cod" || lowerCol === "codigo" || lowerCol === "id_cliente" || lowerCol === "id") {
+          initialMappings[col] = "__external_id";
+        } else if (lowerCol.includes("codigo") || lowerCol.includes("ref") || lowerCol.includes("referencia")) {
+          initialMappings[col] = "ref";
+        } else if (lowerCol.includes("nombre") || lowerCol.includes("razon") || lowerCol.includes("name") || lowerCol.includes("social")) {
+          initialMappings[col] = "name";
+        } else if (lowerCol.includes("cif") || lowerCol.includes("nif") || lowerCol.includes("vat") || lowerCol.includes("documento") || lowerCol.includes("identificacion")) {
+          initialMappings[col] = "vat";
+        } else if (lowerCol.includes("mail") || lowerCol.includes("email") || lowerCol.includes("correo")) {
+          initialMappings[col] = "email";
+        } else if (lowerCol.includes("contacto") || lowerCol.includes("persona") || lowerCol.includes("representante") || lowerCol.includes("pcocli") || lowerCol.includes("pcopro")) {
+          initialMappings[col] = "contact_name";
+        } else if (lowerCol.includes("movil") || lowerCol.includes("mobile") || lowerCol.includes("celular")) {
+          initialMappings[col] = "mobile";
+        } else if (lowerCol.includes("telefono") || lowerCol.includes("phone")) {
+          initialMappings[col] = "phone";
+        } else if (lowerCol.includes("calle") || lowerCol.includes("direccion") || lowerCol.includes("street")) {
+          initialMappings[col] = "street";
+        } else if (lowerCol.includes("cp") || lowerCol.includes("postal") || lowerCol.includes("zip") || lowerCol.includes("c.postal")) {
+          initialMappings[col] = "zip";
+        } else if (lowerCol.includes("ciudad") || lowerCol.includes("poblacion") || lowerCol.includes("city") || lowerCol.includes("municipio")) {
+          initialMappings[col] = "city";
+        } else if (lowerCol.includes("iban") || lowerCol.includes("swfcli") || lowerCol.includes("swfpro") || lowerCol.includes("cuenta") || lowerCol.includes("cuecli") || lowerCol.includes("cuepro")) {
+          initialMappings[col] = "bank_acc_number";
+        } else if (lowerCol.includes("banco") || lowerCol.includes("bancli") || lowerCol.includes("banpro") || lowerCol.includes("entidad")) {
+          initialMappings[col] = "bank_name";
+        } else {
+          initialMappings[col] = "";
+        }
+      });
+    }
+    setMappings(initialMappings);
+
+    // Autodetectar columna para ID externo
+    let defaultExtIdCol = "";
+    if (selectedModel === "product.template") {
+      const found = sourceColumns.find((col: string) => {
+        const lower = col.toLowerCase();
+        return lower === "codart" || lower === "código" || lower === "cod" || lower === "id" || lower === "referencia" || lower === "ref";
+      });
+      if (found) defaultExtIdCol = found;
+    } else if (selectedModel === "account.move" || selectedModel === "account.move.supplier" || selectedModel === "sale.order") {
+      const found = sourceColumns.find((col: string) => {
+        const lower = col.toLowerCase();
+        return lower === "codfac" || lower === "codfrt" || lower === "codped" || lower === "numfac" || lower === "numfrt" || lower === "numped" || lower === "factura" || lower === "pedido" || lower === "id" || lower === "name";
+      });
+      if (found) defaultExtIdCol = found;
+    } else {
+      const found = sourceColumns.find((col: string) => {
+        const lower = col.toLowerCase();
+        return lower === "codcli" || lower === "codpro" || lower === "cod" || lower === "código" || lower === "id_cliente" || lower === "id";
+      });
+      if (found) defaultExtIdCol = found;
+    }
+    setExternalIdColumn(defaultExtIdCol);
+
+    // Autodetectar tabla de categorías/familias
+    const foundFamTable = tables.find((t: string) => {
+      const lower = t.toLowerCase();
+      return lower === "f_fam" || lower === "familias" || lower === "familia" || lower === "families" || lower === "category" || lower === "categories";
+    });
+    setCategoriesTable(foundFamTable || "");
+
+  }, [selectedModel, sourceColumns, tables]);
+
   // Auto-scroll para la consola de logs
   useEffect(() => {
     const consoleEl = document.getElementById("logs-console");
@@ -94,26 +267,77 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     }
   }, [logs]);
 
-  const [odooFields, setOdooFields] = useState<any[]>([
-    { name: "__external_id", label: "ID Externo (XML ID)", required: false },
-    { name: "ref", label: "Referencia Externa (ref)", required: false },
-    { name: "name", label: "Nombre/Razón Social (name)", required: true },
-    { name: "vat", label: "NIF/CIF (vat)", required: false },
-    { name: "email", label: "Correo Electrónico (email)", required: false },
-    { name: "phone", label: "Teléfono Fijo (phone)", required: false },
-    { name: "mobile", label: "Teléfono Móvil (mobile)", required: false },
-    { name: "street", label: "Calle (street)", required: false },
-    { name: "zip", label: "Código Postal (zip)", required: false },
-    { name: "city", label: "Ciudad (city)", required: false },
-    { name: "_country", label: "País (country_id)", required: false },
-    { name: "_state", label: "Provincia/Estado (state_id)", required: false },
-    { name: "contact_name", label: "Contacto: Nombre", required: false },
-    { name: "contact_email", label: "Contacto: Email", required: false },
-    { name: "contact_phone", label: "Contacto: Teléfono", required: false },
-    { name: "contact_mobile", label: "Contacto: Móvil", required: false },
-    { name: "bank_acc_number", label: "Banco: Número de Cuenta (IBAN)", required: false },
-    { name: "bank_name", label: "Banco: Nombre de la Entidad", required: false },
-  ]);
+  const [odooFields, setOdooFields] = useState<any[]>([]);
+
+  // Reset odooFields to model-specific defaults when model changes,
+  // so the user never sees another model's fields while Odoo loads.
+  useEffect(() => {
+    if (selectedModel.startsWith("res.partner")) {
+      setOdooFields([
+        { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+        { name: "name", label: "Nombre/Razón Social (name)", required: true },
+        { name: "vat", label: "NIF/CIF (vat)", required: false },
+        { name: "ref", label: "Referencia Externa (ref)", required: false },
+        { name: "email", label: "Email (email)", required: false },
+        { name: "phone", label: "Teléfono (phone)", required: false },
+        { name: "mobile", label: "Móvil (mobile)", required: false },
+        { name: "street", label: "Calle (street)", required: false },
+        { name: "zip", label: "Código Postal (zip)", required: false },
+        { name: "city", label: "Ciudad (city)", required: false },
+        { name: "_country", label: "País (country_id)", required: false },
+        { name: "_state", label: "Provincia/Estado (state_id)", required: false },
+        { name: "contact_name", label: "Contacto: Nombre", required: false },
+        { name: "contact_email", label: "Contacto: Email", required: false },
+        { name: "contact_phone", label: "Contacto: Teléfono", required: false },
+        { name: "contact_mobile", label: "Contacto: Móvil", required: false },
+        { name: "bank_acc_number", label: "Banco: Número de Cuenta (IBAN)", required: false },
+        { name: "bank_name", label: "Banco: Nombre de la Entidad", required: false },
+      ]);
+    } else if (selectedModel === "product.template") {
+      setOdooFields([
+        { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+        { name: "name", label: "Nombre del Producto (name)", required: true },
+        { name: "default_code", label: "Referencia Interna (default_code)", required: false },
+        { name: "barcode", label: "Código de Barras (barcode)", required: false },
+        { name: "list_price", label: "Precio de Venta (list_price)", required: false },
+        { name: "standard_price", label: "Coste (standard_price)", required: false },
+        { name: "_category", label: "Categoría (categ_id)", required: false },
+      ]);
+    } else if (selectedModel === "sale.order") {
+      setOdooFields([
+        { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+        { name: "name", label: "Número de Pedido (name)", required: true },
+        { name: "_partner_code", label: "Código Cliente (_partner_code)", required: true },
+        { name: "date_order", label: "Fecha del Pedido (date_order)", required: false },
+        { name: "client_order_ref", label: "Referencia Cliente (client_order_ref)", required: false },
+        { name: "note", label: "Notas/Observaciones (note)", required: false },
+      ]);
+    } else if (selectedModel === "account.move" || selectedModel === "account.move.supplier") {
+      setOdooFields([
+        { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+        { name: "name", label: "Número de Factura (name)", required: true },
+        { name: "_partner_code", label: "Código Cliente/Proveedor (_partner_code)", required: true },
+        { name: "invoice_date", label: "Fecha de Factura (invoice_date)", required: false },
+        { name: "ref", label: "Referencia (ref)", required: false },
+        { name: "narration", label: "Observaciones (narration)", required: false },
+      ]);
+    } else if (selectedModel === "account.move.entry") {
+      setOdooFields([
+        { name: "__external_id", label: "ID Externo (XML ID)", required: false },
+        { name: "name", label: "Número Asiento (name)", required: true },
+        { name: "date", label: "Fecha (date)", required: false },
+        { name: "ref", label: "Referencia (ref)", required: false },
+        { name: "journal_id", label: "Diario (journal_id)", required: false },
+        { name: "line_ids/account_id", label: "Cuenta Contable Apunte *", required: true },
+        { name: "line_ids/name", label: "Concepto Apunte *", required: true },
+        { name: "line_ids/debit", label: "Debe (Importe)", required: false },
+        { name: "line_ids/credit", label: "Haber (Importe)", required: false },
+        { name: "_line_amount", label: "Importe Único (Debe/Haber)", required: false },
+        { name: "_line_side", label: "Indicador Lado (D/H)", required: false },
+        { name: "line_ids/partner_id", label: "Partner en Apunte (Opcional)", required: false },
+      ]);
+    }
+  }, [selectedModel]);
 
   useEffect(() => {
     if (!client) return;
@@ -288,172 +512,6 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         setSourceColumns(columns);
         setRowCount(row_count);
         setSampleRows(sample_rows || []);
-        
-        // Mapeo inicial inteligente (Fuzzy Match básico)
-        const initialMappings: Record<string, string> = {};
-        if (selectedModel === "product.template") {
-          columns.forEach((col: string) => {
-            const lowerCol = col.toLowerCase();
-            if (lowerCol === "codart" || lowerCol === "código" || lowerCol === "cod" || lowerCol === "id" || lowerCol === "referencia" || lowerCol === "ref" || lowerCol === "default_code") {
-              initialMappings[col] = "default_code";
-            } else if (lowerCol === "eanart" || lowerCol === "codbar" || lowerCol === "barcode" || lowerCol.includes("ean") || lowerCol.includes("barra")) {
-              initialMappings[col] = "barcode";
-            } else if (lowerCol === "desart" || lowerCol === "nomart" || lowerCol.includes("nombre") || lowerCol.includes("descrip") || lowerCol === "name") {
-              initialMappings[col] = "name";
-            } else if (lowerCol === "pcoart" || lowerCol.includes("coste") || lowerCol.includes("costo") || lowerCol === "cost") {
-              initialMappings[col] = "standard_price";
-            } else if (lowerCol === "pvpart" || lowerCol.includes("venta") || lowerCol.includes("pvp") || lowerCol === "price" || lowerCol === "list_price") {
-              initialMappings[col] = "list_price";
-            } else if (lowerCol === "famart" || lowerCol.includes("familia") || lowerCol.includes("categor") || lowerCol === "category") {
-              initialMappings[col] = "_category";
-            } else {
-              initialMappings[col] = "";
-            }
-          });
-        } else if (selectedModel.startsWith("account.move")) {
-          columns.forEach((col: string) => {
-            const lowerCol = col.toLowerCase();
-            if (selectedModel === "account.move") {
-              // Facturas de clientes
-              if (lowerCol === "codfac" || lowerCol === "numfac" || lowerCol === "factura" || lowerCol === "id" || lowerCol === "name") {
-                initialMappings[col] = "name";
-              } else if (lowerCol === "fecfac" || lowerCol === "fecha" || lowerCol === "invoice_date") {
-                initialMappings[col] = "invoice_date";
-              } else if (lowerCol === "clifac" || lowerCol === "codcli" || lowerCol === "cliente" || lowerCol === "_partner_code") {
-                initialMappings[col] = "_partner_code";
-              } else if (lowerCol === "obsfac" || lowerCol === "observaciones" || lowerCol === "narration" || lowerCol === "obs") {
-                initialMappings[col] = "narration";
-              } else if (lowerCol === "reffac" || lowerCol === "referencia" || lowerCol === "ref") {
-                initialMappings[col] = "ref";
-              } else {
-                initialMappings[col] = "";
-              }
-            } else {
-              // Facturas de proveedores (account.move.supplier)
-              if (lowerCol === "codfrt" || lowerCol === "numfrt" || lowerCol === "factura" || lowerCol === "id" || lowerCol === "name") {
-                initialMappings[col] = "name";
-              } else if (lowerCol === "fecfrt" || lowerCol === "fecha" || lowerCol === "invoice_date") {
-                initialMappings[col] = "invoice_date";
-              } else if (lowerCol === "profrt" || lowerCol === "codpro" || lowerCol === "proveedor" || lowerCol === "_partner_code") {
-                initialMappings[col] = "_partner_code";
-              } else if (lowerCol === "obsfrt" || lowerCol === "observaciones" || lowerCol === "narration" || lowerCol === "obs") {
-                initialMappings[col] = "narration";
-              } else if (lowerCol === "reffrt" || lowerCol === "referencia" || lowerCol === "ref") {
-                initialMappings[col] = "ref";
-              } else {
-                initialMappings[col] = "";
-              }
-            }
-          });
-        } else if (selectedModel === "sale.order") {
-          columns.forEach((col: string) => {
-            const lowerCol = col.toLowerCase();
-            if (lowerCol === "codped" || lowerCol === "numped" || lowerCol === "pedido" || lowerCol === "id" || lowerCol === "name" || lowerCol === "codfac" || lowerCol === "numfac") {
-              initialMappings[col] = "name";
-            } else if (lowerCol === "fecped" || lowerCol === "fecha" || lowerCol === "date_order" || lowerCol === "fecfac") {
-              initialMappings[col] = "date_order";
-            } else if (lowerCol === "cliped" || lowerCol === "codcli" || lowerCol === "cliente" || lowerCol === "_partner_code" || lowerCol === "clifac") {
-              initialMappings[col] = "_partner_code";
-            } else if (lowerCol === "obsped" || lowerCol === "observaciones" || lowerCol === "note" || lowerCol === "obs" || lowerCol === "obsfac") {
-              initialMappings[col] = "note";
-            } else if (lowerCol === "refped" || lowerCol === "referencia" || lowerCol === "ref") {
-              initialMappings[col] = "client_order_ref";
-            } else {
-              initialMappings[col] = "";
-            }
-          });
-        } else if (selectedModel === "account.move.entry") {
-          columns.forEach((col: string) => {
-            const lowerCol = col.toLowerCase();
-            if (lowerCol === "asiapu" || lowerCol === "asiento" || lowerCol === "id" || lowerCol === "name") {
-              initialMappings[col] = "name";
-            } else if (lowerCol === "fecapu" || lowerCol === "fecha" || lowerCol === "date") {
-              initialMappings[col] = "date";
-            } else if (lowerCol === "docapu" || lowerCol === "documento" || lowerCol === "referencia" || lowerCol === "ref") {
-              initialMappings[col] = "ref";
-            } else if (lowerCol === "diaapu" || lowerCol === "diario" || lowerCol === "journal") {
-              initialMappings[col] = "journal_id";
-            } else if (lowerCol === "cueapu" || lowerCol === "cuenta" || lowerCol === "account") {
-              initialMappings[col] = "line_ids/account_id";
-            } else if (lowerCol === "conapu" || lowerCol === "concepto" || lowerCol === "glosa" || lowerCol === "descrip") {
-              initialMappings[col] = "line_ids/name";
-            } else if (lowerCol === "debe" || lowerCol === "debit") {
-              initialMappings[col] = "line_ids/debit";
-            } else if (lowerCol === "haber" || lowerCol === "credit") {
-              initialMappings[col] = "line_ids/credit";
-            } else if (lowerCol === "imeapu" || lowerCol === "importe" || lowerCol === "monto" || lowerCol === "amount") {
-              initialMappings[col] = "_line_amount";
-            } else if (lowerCol === "d-hapu" || lowerCol === "dh" || lowerCol === "debe_haber" || lowerCol === "lado" || lowerCol === "side") {
-              initialMappings[col] = "_line_side";
-            } else {
-              initialMappings[col] = "";
-            }
-          });
-        } else {
-          columns.forEach((col: string) => {
-            const lowerCol = col.toLowerCase();
-            if (lowerCol === "codcli" || lowerCol === "codpro" || lowerCol === "cod" || lowerCol === "código" || lowerCol === "id_cliente" || lowerCol === "id") {
-              initialMappings[col] = "__external_id";
-            } else if (lowerCol.includes("código") || lowerCol.includes("ref") || lowerCol.includes("referencia")) {
-              initialMappings[col] = "ref";
-            } else if (lowerCol.includes("nombre") || lowerCol.includes("razón") || lowerCol.includes("name") || lowerCol.includes("social")) {
-              initialMappings[col] = "name";
-            } else if (lowerCol.includes("cif") || lowerCol.includes("nif") || lowerCol.includes("vat") || lowerCol.includes("documento")) {
-              initialMappings[col] = "vat";
-            } else if (lowerCol.includes("mail") || lowerCol.includes("email") || lowerCol.includes("correo")) {
-              initialMappings[col] = "email";
-            } else if (lowerCol.includes("contacto") || lowerCol.includes("persona") || lowerCol.includes("representante") || lowerCol.includes("pcocli") || lowerCol.includes("pcopro")) {
-              initialMappings[col] = "contact_name";
-            } else if (lowerCol.includes("móvil") || lowerCol.includes("mobile") || lowerCol.includes("celular")) {
-              initialMappings[col] = "mobile";
-            } else if (lowerCol.includes("teléfono") || lowerCol.includes("phone")) {
-              initialMappings[col] = "phone";
-            } else if (lowerCol.includes("calle") || lowerCol.includes("dirección") || lowerCol.includes("street")) {
-              initialMappings[col] = "street";
-            } else if (lowerCol.includes("cp") || lowerCol.includes("postal") || lowerCol.includes("zip") || lowerCol.includes("c.postal")) {
-              initialMappings[col] = "zip";
-            } else if (lowerCol.includes("ciudad") || lowerCol.includes("población") || lowerCol.includes("city") || lowerCol.includes("municipio")) {
-              initialMappings[col] = "city";
-            } else if (lowerCol.includes("iban") || lowerCol.includes("swfcli") || lowerCol.includes("swfpro") || lowerCol.includes("cuenta") || lowerCol.includes("cuecli") || lowerCol.includes("cuepro")) {
-              initialMappings[col] = "bank_acc_number";
-            } else if (lowerCol.includes("banco") || lowerCol.includes("bancli") || lowerCol.includes("banpro") || lowerCol.includes("entidad")) {
-              initialMappings[col] = "bank_name";
-            } else {
-              initialMappings[col] = "";
-            }
-          });
-        }
-        // Autodetectar columna para ID externo
-        let defaultExtIdCol = "";
-        if (selectedModel === "product.template") {
-          const found = columns.find((col: string) => {
-            const lower = col.toLowerCase();
-            return lower === "codart" || lower === "código" || lower === "cod" || lower === "id" || lower === "referencia" || lower === "ref";
-          });
-          if (found) defaultExtIdCol = found;
-        } else if (selectedModel.startsWith("account.move") || selectedModel === "sale.order") {
-          const found = columns.find((col: string) => {
-            const lower = col.toLowerCase();
-            return lower === "codfac" || lower === "codfrt" || lower === "codped" || lower === "numfac" || lower === "numfrt" || lower === "numped" || lower === "factura" || lower === "pedido" || lower === "id" || lower === "name";
-          });
-          if (found) defaultExtIdCol = found;
-        } else {
-          const found = columns.find((col: string) => {
-            const lower = col.toLowerCase();
-            return lower === "codcli" || lower === "codpro" || lower === "cod" || lower === "código" || lower === "id_cliente" || lower === "id";
-          });
-          if (found) defaultExtIdCol = found;
-        }
-        setExternalIdColumn(defaultExtIdCol);
-
-        // Autodetectar tabla de categorías/familias
-        const foundFamTable = tables.find((t: string) => {
-          const lower = t.toLowerCase();
-          return lower === "f_fam" || lower === "familias" || lower === "familia" || lower === "families" || lower === "category" || lower === "categories";
-        });
-        setCategoriesTable(foundFamTable || "");
-
-        setMappings(initialMappings);
       } else {
         alert("Error al analizar la hoja/tabla: " + response.error);
       }
@@ -492,7 +550,8 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     if (!isTauri) {
       logIntervalId = setInterval(async () => {
         try {
-          const res = await fetch("http://127.0.0.1:8000/api/logs");
+          const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://127.0.0.1:8000' : '';
+          const res = await fetch(`${apiBase}/api/logs`);
           if (res.ok) {
             const data = await res.json();
             if (data && data.logs) {
@@ -509,7 +568,11 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                       if (parsed.total > 0) {
                         lastProgress = { done: parsed.done, total: parsed.total };
                       }
-                      continue; // Omitir esta línea JSON de la consola de logs
+                      // Mostrar warnings (ej. pedidos no confirmados) en la consola
+                      if (parsed.action === "warning" && parsed.message) {
+                        displayLogs.push(`⚠️ AVISO: ${parsed.message}`);
+                      }
+                      continue; // Omitir el resto de eventos JSON de la consola
                     }
                   } catch {
                     // No es JSON, conservar
@@ -574,7 +637,9 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           categories_table: categoriesTable,
           batch_size: batchSize,
           confirm_orders: confirmOrders,
+          force_invoiced: forceInvoiced,
           post_entries: postEntries,
+          format_name: formatName,
         },
         dry_run: isDryRun,
       });
@@ -1170,6 +1235,24 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                       className="w-4 h-4 accent-primary"
                     />
                   </div>
+                  {confirmOrders && (
+                    <>
+                      <div className="h-[1px] bg-border" />
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-bold text-xs">Forzar estado &quot;Facturado&quot; (force_invoiced)</h4>
+                          <p className="text-[10px] text-muted-foreground">Tras confirmar cada pedido, lo marca como totalmente facturado aunque no tenga facturas vinculadas.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={forceInvoiced}
+                          disabled={isMigrating}
+                          onChange={(e) => setForceInvoiced(e.target.checked)}
+                          className="w-4 h-4 accent-primary"
+                        />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
               {selectedModel === "account.move.entry" && (
@@ -1185,6 +1268,24 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                       checked={postEntries}
                       disabled={isMigrating}
                       onChange={(e) => setPostEntries(e.target.checked)}
+                      className="w-4 h-4 accent-primary"
+                    />
+                  </div>
+                </>
+              )}
+              {(selectedModel === "sale.order" || selectedModel === "account.move" || selectedModel === "account.move.supplier") && (
+                <>
+                  <div className="h-[1px] bg-border" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs">Formatear nombre (Añadir prefijo, año...)</h4>
+                      <p className="text-[10px] text-muted-foreground">Si se desmarca, se mantendrá el nombre original de la factura/pedido (ej. 152) sin añadir prefijos (ej. SO/2026/0/152).</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formatName}
+                      disabled={isMigrating}
+                      onChange={(e) => setFormatName(e.target.checked)}
                       className="w-4 h-4 accent-primary"
                     />
                   </div>
@@ -1315,15 +1416,33 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
             </div>
 
             {migrationStats && migrationStats.error_count > 0 && (
-              <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-xl text-left space-y-2 max-h-[150px] overflow-y-auto">
-                <h4 className="font-bold text-xs text-red-400">Detalles de errores ({migrationStats.error_count})</h4>
-                <ul className="space-y-1 list-disc list-inside text-[11px] text-muted-foreground">
+              <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-xl text-left space-y-2 max-h-[300px] overflow-y-auto">
+                <h4 className="font-bold text-sm text-red-400 flex items-center gap-2">
+                  ⚠️ Registros con error ({migrationStats.error_count}) — copia esta lista para buscarlos en Odoo
+                </h4>
+                <div className="space-y-1.5">
                   {migrationStats.errors.map((e, index) => (
-                    <li key={index}>
-                      Fila {e.row}: {e.error}
-                    </li>
+                    <div key={index} className="flex items-start gap-2 bg-red-900/20 border border-red-500/10 px-3 py-2 rounded-lg">
+                      <span className="text-red-400 font-mono font-black text-xs shrink-0">
+                        {e.name ? `📄 ${e.name}` : `#${e.row}`}
+                      </span>
+                      <span className="text-muted-foreground text-[10px] leading-relaxed">
+                        {e.error}
+                      </span>
+                    </div>
                   ))}
-                </ul>
+                </div>
+                <button
+                  onClick={() => {
+                    const lines = migrationStats.errors.map(e =>
+                      `${e.name || `fila_${e.row}`}: ${e.error}`
+                    ).join("\n");
+                    navigator.clipboard.writeText(lines);
+                  }}
+                  className="text-[10px] text-red-400/70 hover:text-red-400 transition border border-red-500/20 rounded px-2 py-1 mt-1"
+                >
+                  📋 Copiar lista de errores al portapapeles
+                </button>
               </div>
             )}
 

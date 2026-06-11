@@ -1,0 +1,7 @@
+{
+  "command": "analyze_source",
+  "args": {
+    "path": "C:\\Users\\scoba\\Downloads\\Copia de FV2021_COIMBRA (2).xlsx",
+    "table": "pedidos"
+  }
+}

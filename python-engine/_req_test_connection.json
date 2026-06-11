@@ -1,0 +1,9 @@
+{
+  "command": "test_connection",
+  "args": {
+    "url": "",
+    "db": "",
+    "username": "",
+    "password": ""
+  }
+}

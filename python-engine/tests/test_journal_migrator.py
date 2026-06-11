@@ -27,6 +27,30 @@ def test_resolve_account():
     mock_odoo.search.assert_not_called()
 
 
+def test_resolve_account_fallback():
+    mock_odoo = MagicMock()
+    migrator = JournalEntryMigrator(
+        odoo=mock_odoo,
+        mapping={"CUEAPU": "line_ids/account_id"}
+    )
+
+    # Simular que la búsqueda exacta no devuelve nada, pero la de fallback sí
+    def mock_search(model, domain):
+        if model == "account.account":
+            if ("code", "=", "43000028") in domain:
+                return []
+            if ("code", "=like", "4300002%") in domain:
+                return [4001]
+        return []
+
+    mock_odoo.search.side_effect = mock_search
+    mock_odoo.read.return_value = [{"code": "43000020"}]
+
+    assert migrator._resolve_account("43000028") == 4001
+    mock_odoo.search.assert_any_call("account.account", [("code", "=", "43000028")])
+    mock_odoo.search.assert_any_call("account.account", [("code", "=like", "4300002%")])
+
+
 def test_extract_partner_code_from_account():
     migrator = JournalEntryMigrator(odoo=MagicMock(), mapping={})
     
@@ -107,7 +131,7 @@ def test_migrator_run_creation():
 
     mock_odoo.create.assert_called_once()
     created_vals = mock_odoo.create.call_args[0][1]
-    assert created_vals["name"] == "AS-100"
+    assert created_vals["name"] == "IMPOR/2026/1/AS-100"
     assert created_vals["date"] == "2026-05-27"
     assert created_vals["ref"] == "REF-ABC"
     
@@ -123,7 +147,7 @@ def test_migrator_run_creation():
     assert created_vals["line_ids"][1][2]["debit"] == 0.0
     assert created_vals["line_ids"][1][2]["credit"] == 100.0
 
-    mock_odoo.create_or_update_xml_id.assert_called_with("asi_AS-100", "account.move", 5001)
+    mock_odoo.create_or_update_xml_id.assert_called_with("asi_2026_1_AS-100", "account.move", 5001)
     mock_odoo.execute.assert_any_call("account.move", "action_post", [5001])
 
 
@@ -133,7 +157,7 @@ def test_migrator_run_update_existing_posted():
     # Mocks de Odoo:
     # 1. Asiento ya existe -> 5001
     def mock_xml_id(xml_id, model):
-        if model == "account.move" and xml_id == "asi_AS-100":
+        if model == "account.move" and xml_id == "asi_2026_1_AS-100":
             return 5001
         return None
     mock_odoo.get_xml_id_res_id.side_effect = mock_xml_id

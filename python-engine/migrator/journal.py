@@ -99,6 +99,29 @@ class JournalEntryMigrator:
                 if ids:
                     self._account_cache[clean_code] = ids[0]
                     return ids[0]
+
+            # Fallback dinámico por prefijos si no se encuentra la cuenta exacta
+            # Esto resuelve descuadres de dígitos (ej: origen 7/8 dígitos y Odoo 6 dígitos)
+            # Buscamos desde el prefijo más específico (largo) al más general (corto, min 3 dígitos)
+            for length in range(len(clean_code_no_dots) - 1, 2, -1):
+                prefix = clean_code_no_dots[:length]
+                ids = self.odoo.search("account.account", [("code", "=like", f"{prefix}%")])
+                if ids:
+                    found_id = ids[0]
+                    try:
+                        acc_info = self.odoo.read("account.account", [found_id], ["code"])
+                        found_code = acc_info[0]["code"] if acc_info else prefix
+                        log.info(
+                            "Cuenta exacta '%s' no encontrada. Fallback automático a la cuenta padre '%s' (ID %s)",
+                            clean_code, found_code, found_id
+                        )
+                    except Exception:
+                        log.info(
+                            "Cuenta exacta '%s' no encontrada. Fallback automático a cuenta con prefijo '%s' (ID %s)",
+                            clean_code, prefix, found_id
+                        )
+                    self._account_cache[clean_code] = found_id
+                    return found_id
         except Exception as e:
             log.warning("Error al resolver cuenta '%s': %s", clean_code, e)
 
@@ -141,7 +164,7 @@ class JournalEntryMigrator:
             # 1. Buscar por XML ID con los prefijos cli_ y pro_/prov_
             prefixes = ["cli_"] if not is_supplier else ["pro_", "prov_"]
             for pref in prefixes:
-                xml_id = f"{pref}{key}"
+                xml_id = key if key.startswith(pref) else f"{pref}{key}"
                 partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
                 if partner_id:
                     self._partner_cache[cache_key] = partner_id
@@ -281,8 +304,10 @@ class JournalEntryMigrator:
                     raise ValueError("El número o nombre del asiento contable (campo 'name') es obligatorio.")
 
                 # Generar XML ID único para el asiento
-                clean_name = clean_xml_id(name)
-                xml_id = f"{self.options.external_id_prefix}{clean_name}"
+                xml_id = vals.pop("__external_id", None)
+                if not xml_id:
+                    clean_name = clean_xml_id(name)
+                    xml_id = f"{self.options.external_id_prefix}{clean_name}"
 
                 # 2. Comprobar si ya existe
                 existing_id = self.odoo.get_xml_id_res_id(xml_id, ACCOUNT_MOVE_MODEL)

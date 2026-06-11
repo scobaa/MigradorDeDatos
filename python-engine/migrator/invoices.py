@@ -25,6 +25,7 @@ class MigrationOptions:
     update_existing: bool = True
     batch_size: int = 50
     external_id_prefix: str = "inv_"
+    format_name: bool = True
 
 
 @dataclass
@@ -89,7 +90,7 @@ class InvoiceMigrator:
         try:
             # 1. Buscar por XML ID
             prefix = "cli_" if self.move_type == "out_invoice" else "prov_"
-            xml_id = f"{prefix}{key}"
+            xml_id = key if key.startswith(prefix) else f"{prefix}{key}"
             partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
             if partner_id:
                 self._partner_cache[key] = partner_id
@@ -129,7 +130,7 @@ class InvoiceMigrator:
                 return ids[0]
 
             # 2. Buscar por XML ID de product.template
-            xml_id = f"art_{key}"
+            xml_id = key if key.startswith("art_") else f"art_{key}"
             tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
             if tmpl_id:
                 p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
@@ -195,7 +196,7 @@ class InvoiceMigrator:
 
     def _process_row(self, row: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         """Transforma una fila cruda y resuelve sus relaciones in-place."""
-        vals = transform_invoice(row, self.mapping, self.move_type)
+        vals = transform_invoice(row, self.mapping, self.move_type, format_name=self.options.format_name)
 
         # 1. Resolver partner
         partner_code = vals.pop("_partner_code", None)
@@ -221,6 +222,8 @@ class InvoiceMigrator:
                 "quantity": line["quantity"],
                 "price_unit": line["price_unit"],
             }
+            if "discount" in line:
+                line_vals["discount"] = line["discount"]
             if product_id:
                 line_vals["product_id"] = product_id
 

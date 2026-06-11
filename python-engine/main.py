@@ -330,7 +330,13 @@ def handle_preview_migration(args: dict) -> None:
             all_rows = list(conn.iter_rows(table))
             grouped = {}
             for row in all_rows:
-                key = str(row.get(name_col, "")).strip()
+                col_val = None
+                col_clean = name_col.strip().lower()
+                for k, v in row.items():
+                    if str(k).strip().lower() == col_clean:
+                        col_val = v
+                        break
+                key = str(col_val if col_val is not None else "").strip()
                 if key.endswith(".0"):
                     key = key[:-2]
                 if key:
@@ -352,10 +358,50 @@ def handle_preview_migration(args: dict) -> None:
         else:
             # Pre-cargar líneas si es factura o pedido
             grouped_lines = None
+            is_flat = False
+            preview_rows_iter = None
             if model.startswith("account.move") or model == "sale.order":
                 grouped_lines = _preload_invoice_lines(conn, table, mapping)
+                if not grouped_lines:
+                    name_col = None
+                    for src_col, odoo_field in mapping.items():
+                        if odoo_field in ("name", "__external_id"):
+                            name_col = src_col
+                            break
+                    if name_col:
+                        is_flat = True
+                        log.info("Formato plano: agrupando %s por %s", model, name_col)
+                        all_rows = list(conn.iter_rows(table))
+                        grouped = {}
+                        current_key = None
+                        for row in all_rows:
+                            col_val = None
+                            col_clean = name_col.strip().lower()
+                            for k, v in row.items():
+                                if str(k).strip().lower() == col_clean:
+                                    col_val = v
+                                    break
+                            key = str(col_val if col_val is not None else "").strip()
+                            if key.endswith(".0"):
+                                key = key[:-2]
+                                
+                            if key:
+                                current_key = key
+                                
+                            if current_key:
+                                grouped.setdefault(current_key, []).append(row)
+                        
+                        preview_rows = []
+                        for key, lines in list(grouped.items())[:limit]:
+                            header = dict(lines[0])
+                            header["_lines"] = lines
+                            preview_rows.append(header)
+                        preview_rows_iter = preview_rows
 
-            for row in conn.iter_rows(table, limit=limit):
+            if preview_rows_iter is None:
+                preview_rows_iter = conn.iter_rows(table, limit=limit)
+
+            for row in preview_rows_iter:
                 try:
                     if model.startswith("res.partner"):
                         from transformers.partners import transform_partner
@@ -371,44 +417,41 @@ def handle_preview_migration(args: dict) -> None:
                         vals = transform_product(row, mapping)
                     elif model.startswith("account.move"):
                         from transformers.invoices import transform_invoice
-                        # Encontrar el código de factura en esta fila
-                        name_col = None
-                        for src_col, odoo_field in mapping.items():
-                            if odoo_field == "name":
-                                name_col = src_col
-                                break
-                        
-                        # Adjuntar líneas agrupadas correspondientes
                         row_with_lines = dict(row)
-                        if name_col and grouped_lines:
-                            header_id = str(row.get(name_col, "")).strip()
-                            if header_id.endswith(".0"):
-                                header_id = header_id[:-2]
-                            row_with_lines["_lines"] = grouped_lines.get(header_id, [])
-                        else:
-                            row_with_lines["_lines"] = []
+                        if not is_flat:
+                            name_col = None
+                            for src_col, odoo_field in mapping.items():
+                                if odoo_field == "name":
+                                    name_col = src_col
+                                    break
+                            if name_col and grouped_lines:
+                                header_id = str(row.get(name_col, "")).strip()
+                                if header_id.endswith(".0"):
+                                    header_id = header_id[:-2]
+                                row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                            else:
+                                row_with_lines["_lines"] = []
 
                         move_type = "out_invoice" if model == "account.move" else "in_invoice"
-                        vals = transform_invoice(row_with_lines, mapping, move_type=move_type)
+                        vals = transform_invoice(row_with_lines, mapping, move_type=move_type, format_name=options.get("format_name", True))
                     elif model == "sale.order":
                         from transformers.sales import transform_sales_order
-                        # Encontrar el código de pedido en esta fila
-                        name_col = None
-                        for src_col, odoo_field in mapping.items():
-                            if odoo_field == "name":
-                                name_col = src_col
-                                break
-                        
                         row_with_lines = dict(row)
-                        if name_col and grouped_lines:
-                            header_id = str(row.get(name_col, "")).strip()
-                            if header_id.endswith(".0"):
-                                header_id = header_id[:-2]
-                            row_with_lines["_lines"] = grouped_lines.get(header_id, [])
-                        else:
-                            row_with_lines["_lines"] = []
+                        if not is_flat:
+                            name_col = None
+                            for src_col, odoo_field in mapping.items():
+                                if odoo_field == "name":
+                                    name_col = src_col
+                                    break
+                            if name_col and grouped_lines:
+                                header_id = str(row.get(name_col, "")).strip()
+                                if header_id.endswith(".0"):
+                                    header_id = header_id[:-2]
+                                row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                            else:
+                                row_with_lines["_lines"] = []
 
-                        vals = transform_sales_order(row_with_lines, mapping)
+                        vals = transform_sales_order(row_with_lines, mapping, format_name=options.get("format_name", True))
                     else:
                         raise ValueError(f"Modelo no soportado para vista previa: {model}")
                     results.append({"ok": True, "data": vals})
@@ -517,6 +560,7 @@ def handle_run_migration(args: dict) -> None:
             update_existing=opts.get("update_existing", True),
             external_id_prefix=opts.get("external_id_prefix", "inv_"),
             batch_size=int(opts.get("batch_size", 50)),
+            format_name=opts.get("format_name", True),
         )
         move_type = "out_invoice" if model == "account.move" else "in_invoice"
         migrator = InvoiceMigrator(odoo, mapping, invoice_opts, move_type=move_type)
@@ -524,9 +568,11 @@ def handle_run_migration(args: dict) -> None:
         from migrator.sales import MigrationOptions as SalesOptions, SalesOrderMigrator
         sales_opts = SalesOptions(
             update_existing=opts.get("update_existing", True),
-            external_id_prefix=opts.get("external_id_prefix", "so_"),
+            external_id_prefix=opts.get("external_id_prefix", None),  # None → el migrador usará "so_" por defecto; "" → sin prefijo
             batch_size=int(opts.get("batch_size", 50)),
             confirm_orders=opts.get("confirm_orders", True),
+            force_invoiced=opts.get("force_invoiced", False),
+            format_name=opts.get("format_name", True),
         )
         migrator = SalesOrderMigrator(odoo, mapping, sales_opts)
     else:
@@ -545,7 +591,13 @@ def handle_run_migration(args: dict) -> None:
             all_rows = list(conn.iter_rows(table))
             grouped = {}
             for row in all_rows:
-                key = str(row.get(name_col, "")).strip()
+                col_val = None
+                col_clean = name_col.strip().lower()
+                for k, v in row.items():
+                    if str(k).strip().lower() == col_clean:
+                        col_val = v
+                        break
+                key = str(col_val if col_val is not None else "").strip()
                 if key.endswith(".0"):
                     key = key[:-2]
                 if key:
@@ -565,32 +617,78 @@ def handle_run_migration(args: dict) -> None:
             
             # Pre-cargar líneas si es factura o pedido
             grouped_lines = None
+            is_flat = False
             if model.startswith("account.move") or model == "sale.order":
                 grouped_lines = _preload_invoice_lines(conn, table, mapping)
+                if not grouped_lines:
+                    name_col = None
+                    for src_col, odoo_field in mapping.items():
+                        if odoo_field in ("name", "__external_id"):
+                            name_col = src_col
+                            break
+                    if name_col:
+                        is_flat = True
+                        log.info("Formato plano: agrupando %s por %s", model, name_col)
+                        all_rows = list(conn.iter_rows(table))
+                        grouped = {}
+                        current_key = None
+                        for row in all_rows:
+                            col_val = None
+                            col_clean = name_col.strip().lower()
+                            for k, v in row.items():
+                                if str(k).strip().lower() == col_clean:
+                                    col_val = v
+                                    break
+                            key = str(col_val if col_val is not None else "").strip()
+                            if key.endswith(".0"):
+                                key = key[:-2]
+                                
+                            if key:
+                                current_key = key
+                                
+                            if current_key:
+                                grouped.setdefault(current_key, []).append(row)
+                        
+                        grouped_headers = []
+                        for key, lines in grouped.items():
+                            header = dict(lines[0])
+                            header["_lines"] = lines
+                            grouped_headers.append(header)
+                        
+                        total = len(grouped_headers)
+                        rows_iter = grouped_headers[:limit] if limit else grouped_headers
+                        rows_to_migrate = rows_iter
 
-            rows_iter = conn.iter_rows(table, limit=limit)
-            if model.startswith("account.move") or model == "sale.order":
-                name_col = None
-                for src_col, odoo_field in mapping.items():
-                    if odoo_field == "name":
-                        name_col = src_col
-                        break
-                
-                def inject_lines_iter():
-                    for row in rows_iter:
-                        row_with_lines = dict(row)
-                        if name_col and grouped_lines:
-                            header_id = str(row.get(name_col, "")).strip()
-                            if header_id.endswith(".0"):
-                                header_id = header_id[:-2]
-                            row_with_lines["_lines"] = grouped_lines.get(header_id, [])
-                        else:
-                            row_with_lines["_lines"] = []
-                        yield row_with_lines
-                
-                rows_to_migrate = inject_lines_iter()
-            else:
-                rows_to_migrate = rows_iter
+            if not is_flat:
+                rows_iter = conn.iter_rows(table, limit=limit)
+                if model.startswith("account.move") or model == "sale.order":
+                    name_col = None
+                    for src_col, odoo_field in mapping.items():
+                        if odoo_field == "name":
+                            name_col = src_col
+                            break
+                    
+                    def inject_lines_iter():
+                        for row in rows_iter:
+                            row_with_lines = dict(row)
+                            if name_col and grouped_lines:
+                                col_val = None
+                                col_clean = name_col.strip().lower()
+                                for k, v in row.items():
+                                    if str(k).strip().lower() == col_clean:
+                                        col_val = v
+                                        break
+                                header_id = str(col_val if col_val is not None else "").strip()
+                                if header_id.endswith(".0"):
+                                    header_id = header_id[:-2]
+                                row_with_lines["_lines"] = grouped_lines.get(header_id, [])
+                            else:
+                                row_with_lines["_lines"] = []
+                            yield row_with_lines
+                    
+                    rows_to_migrate = inject_lines_iter()
+                else:
+                    rows_to_migrate = rows_iter
 
         stats = migrator.run(
             rows_to_migrate, total=total, dry_run=dry_run

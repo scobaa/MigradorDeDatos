@@ -1,0 +1,12 @@
+{
+  "command": "get_odoo_fields",
+  "args": {
+    "odoo": {
+      "url": "https://staging-plantillas-coimbra-0306.cloudpepper.site/",
+      "db": "staging-plantillas-coimbra-0306.cloudpepper.site",
+      "username": "export@plantillascoimbra.com",
+      "password": "1234"
+    },
+    "model": "sale.order"
+  }
+}
