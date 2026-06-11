@@ -21,19 +21,19 @@ def transform_purchase_line(line_row: dict[str, Any]) -> dict[str, Any]:
 
     for k, v in line_row.items():
         kl = k.lower()
-        if kl in ("artlpe", "artlfa", "articulo", "product", "sku", "code", "referencia", "ref", "order_ids/product_id", "invoice_line_ids/product_id", "order_line/product_id"):
+        if kl in ("artlpe", "artlfa", "artlpp", "articulo", "product", "sku", "code", "referencia", "ref", "order_ids/product_id", "invoice_line_ids/product_id", "order_line/product_id"):
             product_code = clean_str(v)
             if product_code and product_code.endswith(".0"):
                 product_code = product_code[:-2]
-        elif kl in ("deslpe", "deslfa", "descripcion", "description", "name", "nombre", "order_ids/name", "invoice_line_ids/name", "order_line/name"):
+        elif kl in ("deslpe", "deslfa", "deslpp", "descripcion", "description", "name", "nombre", "order_ids/name", "invoice_line_ids/name", "order_line/name"):
             description = clean_str(v) or description
-        elif kl in ("canlpe", "canlfa", "cantidad", "quantity", "qty", "unidades", "order_ids/product_qty", "invoice_line_ids/quantity", "order_line/product_qty"):
+        elif kl in ("canlpe", "canlfa", "canlpp", "cantidad", "quantity", "qty", "unidades", "order_ids/product_qty", "invoice_line_ids/quantity", "order_line/product_qty"):
             quantity = clean_float(v)
-        elif kl in ("prelpe", "prelfa", "precio", "price", "price_unit", "importe", "order_ids/price_unit", "invoice_line_ids/price_unit", "order_line/price_unit"):
+        elif kl in ("prelpe", "prelfa", "prelpp", "precio", "price", "price_unit", "importe", "order_ids/price_unit", "invoice_line_ids/price_unit", "order_line/price_unit"):
             price_unit = clean_float(v)
-        elif kl in ("descuento", "dto", "discount", "order_ids/discount", "invoice_line_ids/discount"):
+        elif kl in ("descuento", "dto", "dtolpp", "dtolpe", "dtolfa", "discount", "order_ids/discount", "invoice_line_ids/discount"):
             discount = clean_float(v)
-        elif kl in ("ivalpe", "ivalfa", "iva", "tax", "pct", "porcentaje", "order_ids/taxes_id", "invoice_line_ids/tax_ids", "order_line/taxes_id"):
+        elif kl in ("ivalpe", "ivalfa", "ivalpp", "iva", "tax", "pct", "porcentaje", "order_ids/taxes_id", "invoice_line_ids/tax_ids", "order_line/taxes_id"):
             tax_value = clean_str(v)
             if tax_value and tax_value.endswith(".0"):
                 tax_value = tax_value[:-2]
