@@ -1,32 +1,11 @@
-# Node
 node_modules/
+.venv/
 dist/
-*.log
-
-# Tauri
-src-tauri/target/
-src-tauri/Cargo.lock
-
-# Python
-python-engine/__pycache__/
-python-engine/**/__pycache__/
-python-engine/.pytest_cache/
-python-engine/.venv/
+__pycache__/
 *.pyc
-
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# Secretos
+logs/
+migration_debug.log
+_req_*.json
+migrador.db
+*.db
 .env
-.env.local
-*.pem
-
-# Datos sensibles de pruebas locales
-test-data/
-*.mdb
-*.accdb
-clientes_*.xlsx
-clientes_*.csv

@@ -17,7 +17,8 @@ cd "$APP_DIR"
 
 echo "[1/3] Descargando últimos cambios de GitHub..."
 git config --global --add safe.directory "$APP_DIR"
-git pull
+git fetch --all
+git reset --hard origin/main
 
 echo ""
 echo "[2/3] Recompilando el Frontend..."
