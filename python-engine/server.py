@@ -42,6 +42,34 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if self.path == "/api/upload":
+            file_name = self.headers.get("X-File-Name", "upload.bin")
+            # Decodificar el nombre por si viene con caracteres especiales
+            import urllib.parse
+            file_name = urllib.parse.unquote(file_name)
+            file_name = os.path.basename(file_name)  # Evitar directorios transversales
+            
+            content_length = int(self.headers.get("Content-Length", 0))
+            file_data = self.rfile.read(content_length)
+            
+            engine_dir = os.path.dirname(os.path.abspath(__file__))
+            app_dir = os.path.dirname(engine_dir)
+            uploads_dir = os.path.join(app_dir, "uploads")
+            if not os.path.exists(uploads_dir):
+                uploads_dir = engine_dir
+                
+            file_path = os.path.join(uploads_dir, file_name)
+            
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(file_data)
+                response = {"status": "ok", "path": file_path}
+                self._send_response_json(200, json.dumps(response).encode("utf-8"))
+            except Exception as e:
+                response = {"status": "error", "error": str(e)}
+                self._send_response_json(500, json.dumps(response).encode("utf-8"))
+            return
+
         if self.path != "/api":
             self.send_response(404)
             self.end_headers()

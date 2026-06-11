@@ -443,6 +443,45 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     fetchOdooFields();
   }, [client, selectedModel]);
 
+  const uploadAndAnalyzeFile = async (file: File) => {
+    const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
+    
+    // Si estamos en la app de escritorio (Tauri), usamos la ruta absoluta nativa
+    if (isTauri && (file as any).path) {
+      handleFileAnalyze((file as any).path);
+      return;
+    }
+
+    // Si estamos en web (OVH o local HTTP), subimos el archivo al servidor Python
+    setIsAnalyzing(true);
+    try {
+      const hostname = window.location.hostname;
+      const apiBase = (hostname === 'localhost' || hostname === '127.0.0.1') ? 'http://127.0.0.1:8000' : '';
+      
+      const response = await fetch(`${apiBase}/api/upload`, {
+        method: "POST",
+        headers: {
+          "X-File-Name": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      
+      if (!response.ok) {
+        throw new Error("Error HTTP al subir el archivo");
+      }
+      
+      const data = await response.json();
+      if (data.status === "ok" && data.path) {
+        handleFileAnalyze(data.path);
+      } else {
+        throw new Error(data.error || "Error guardando el archivo");
+      }
+    } catch (err: any) {
+      setIsAnalyzing(false);
+      alert("Error subiendo archivo: " + err.message);
+    }
+  };
+
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     if (e.type === "dragenter" || e.type === "dragover") {
@@ -456,15 +495,13 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     e.preventDefault();
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      handleFileAnalyze((file as any).path || file.name);
+      uploadAndAnalyzeFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      handleFileAnalyze((file as any).path || file.name);
+      uploadAndAnalyzeFile(e.target.files[0]);
     }
   };
 
@@ -905,37 +942,11 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
               </p>
             </div>
 
-            {/* Manual Absolute Path Input for Browser Mode */}
+            {/* Instrucción clara para web */}
             {typeof (window as any).__TAURI_INTERNALS__ === "undefined" && (
-              <div className="bg-secondary/15 border border-border/80 p-4 rounded-xl text-left space-y-2 max-w-2xl mx-auto">
-                <label className="text-xs font-semibold text-white">Ruta absoluta del archivo local (Modo Navegador)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Ejemplo: C:\Users\scoba\Documents\clientes.xlsx"
-                    defaultValue={fileName || ""}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        const val = (e.target as HTMLInputElement).value.trim();
-                        if (val) handleFileAnalyze(val);
-                      }
-                    }}
-                    className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-white outline-none focus:border-primary/50 text-xs"
-                  />
-                  <button
-                    onClick={(e) => {
-                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
-                      if (input && input.value.trim()) {
-                        handleFileAnalyze(input.value.trim());
-                      }
-                    }}
-                    className="px-4 py-2 bg-primary hover:bg-primary/80 text-white rounded-lg text-xs font-semibold transition shrink-0"
-                  >
-                    Cargar
-                  </button>
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Debido a las restricciones de seguridad del navegador, ingresa la ruta absoluta para que el motor Python local (ejecutándose mediante <code className="text-primary font-mono text-[9px] bg-secondary/80 px-1 py-0.5 rounded">server.py</code>) pueda acceder al archivo en tu disco.
+              <div className="bg-primary/10 border border-primary/20 p-4 rounded-xl text-left space-y-2 max-w-2xl mx-auto">
+                <p className="text-xs text-primary font-semibold">
+                  💡 Modo Web Activo: Puedes arrastrar tu archivo Excel, CSV o Access directamente aquí. Se subirá automáticamente y de forma segura al servidor para ser procesado.
                 </p>
               </div>
             )}
