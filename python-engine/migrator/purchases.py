@@ -289,13 +289,13 @@ class PurchaseOrderMigrator:
                         
                         log.info("Fila %d: Actualizado pedido %s", i, xml_id)
                         _emit_progress(
-                            {"current": i, "total": total, "status": "success", "action": "updated", "xml_id": xml_id}
+                            {"done": i, "total": total, "status": "success", "action": "updated", "xml_id": xml_id}
                         )
                         stats.updated += 1
                     else:
                         log.debug("Fila %d: Omitido pedido %s (ya existe)", i, xml_id)
                         _emit_progress(
-                            {"current": i, "total": total, "status": "success", "action": "skipped", "xml_id": xml_id}
+                            {"done": i, "total": total, "status": "success", "action": "skipped", "xml_id": xml_id}
                         )
                         stats.skipped += 1
                 else:
@@ -314,7 +314,7 @@ class PurchaseOrderMigrator:
 
                     log.info("Fila %d: Creado pedido %s", i, xml_id)
                     _emit_progress(
-                        {"current": i, "total": total, "status": "success", "action": "created", "xml_id": xml_id}
+                        {"done": i, "total": total, "status": "success", "action": "created", "xml_id": xml_id}
                     )
                     stats.created += 1
 
@@ -327,6 +327,6 @@ class PurchaseOrderMigrator:
                 
                 error_info = {"row": i, "name": str(row_name), "error": str(e)}
                 stats.errors.append(error_info)
-                _emit_progress({"current": i, "total": total, "status": "error", "error_info": error_info})
+                _emit_progress({"done": i, "total": total, "status": "error", "error_info": error_info})
 
         return stats
