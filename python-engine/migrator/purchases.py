@@ -257,8 +257,10 @@ class PurchaseOrderMigrator:
         for i, row in enumerate(rows, 1):
             _emit_progress({"current": i, "total": total, "status": "processing"})
             try:
-                raw_id = row.get("__external_id") or row.get(self.mapping.get("name", "name"))
-                if not raw_id:
+                vals = self._process_row(row, dry_run)
+                
+                raw_id = row.get("__external_id") or vals.get("name")
+                if not raw_id or raw_id == "/":
                     raise ValueError("Falta el identificador (__external_id o name)")
 
                 xml_id = clean_xml_id(str(raw_id).strip())
@@ -267,8 +269,6 @@ class PurchaseOrderMigrator:
                     prefix = self.options.external_id_prefix
                     if prefix and not xml_id.startswith(prefix):
                         xml_id = f"{prefix}{xml_id}"
-
-                vals = self._process_row(row, dry_run)
 
                 existing_id = self.odoo.get_xml_id_res_id(xml_id, PURCHASE_ORDER_MODEL)
 
