@@ -285,10 +285,11 @@ class PurchaseOrderMigrator:
                             if self.options.confirm_orders:
                                 self.odoo.execute(PURCHASE_ORDER_MODEL, "button_confirm", [existing_id])
                                 # Restaurar fechas originales que button_confirm sobreescribe
-                                if "date_order" in clean_vals:
+                                original_date = clean_vals.get("date_order") or clean_vals.get("date_approve")
+                                if original_date:
                                     self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {
-                                        "date_order": clean_vals["date_order"],
-                                        "date_approve": clean_vals["date_order"]
+                                        "date_order": original_date,
+                                        "date_approve": original_date
                                     })
                                 if self.options.force_invoiced:
                                     try:
@@ -319,10 +320,11 @@ class PurchaseOrderMigrator:
                         if self.options.confirm_orders:
                             self.odoo.execute(PURCHASE_ORDER_MODEL, "button_confirm", [new_id])
                             # Restaurar fechas originales que button_confirm sobreescribe
-                            if "date_order" in clean_vals:
+                            original_date = clean_vals.get("date_order") or clean_vals.get("date_approve")
+                            if original_date:
                                 self.odoo.write(PURCHASE_ORDER_MODEL, [new_id], {
-                                    "date_order": clean_vals["date_order"],
-                                    "date_approve": clean_vals["date_order"]
+                                    "date_order": original_date,
+                                    "date_approve": original_date
                                 })
                             if self.options.force_invoiced:
                                 try:

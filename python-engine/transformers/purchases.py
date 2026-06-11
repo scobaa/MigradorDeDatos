@@ -66,7 +66,7 @@ def transform_purchase_order(
         if raw is None:
             continue
 
-        if odoo_field == "date_order":
+        if odoo_field in ("date_order", "date_approve", "date_planned"):
             date_clean = clean_date(raw)
             if date_clean:
                 vals[odoo_field] = f"{date_clean} 12:00:00"
