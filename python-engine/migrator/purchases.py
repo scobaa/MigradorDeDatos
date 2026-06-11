@@ -276,14 +276,14 @@ class PurchaseOrderMigrator:
                     if self.options.update_existing:
                         if not dry_run:
                             # Limpiar líneas previas para evitar duplicados al actualizar
-                            self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "write", [[existing_id], {"order_line": [(5, 0, 0)]}])
-                            self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "write", [[existing_id], vals])
+                            self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {"order_line": [(5, 0, 0)]})
+                            self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], vals)
                             
                             # Confirmar
                             if self.options.confirm_orders:
-                                self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "button_confirm", [[existing_id]])
+                                self.odoo.execute(PURCHASE_ORDER_MODEL, "button_confirm", [existing_id])
                                 if self.options.force_invoiced:
-                                    self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "write", [[existing_id], {"invoice_status": "invoiced"}])
+                                    self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {"invoice_status": "invoiced"})
                         
                         log.info("Fila %d: Actualizado pedido %s", i, xml_id)
                         _emit_progress(
@@ -298,14 +298,14 @@ class PurchaseOrderMigrator:
                         stats.skipped += 1
                 else:
                     if not dry_run:
-                        new_id = self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "create", [vals])
+                        new_id = self.odoo.create(PURCHASE_ORDER_MODEL, vals)
                         self.odoo.create_xml_id(xml_id, PURCHASE_ORDER_MODEL, new_id)
                         
                         # Confirmar
                         if self.options.confirm_orders:
-                            self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "button_confirm", [[new_id]])
+                            self.odoo.execute(PURCHASE_ORDER_MODEL, "button_confirm", [new_id])
                             if self.options.force_invoiced:
-                                self.odoo.execute_kw(PURCHASE_ORDER_MODEL, "write", [[new_id], {"invoice_status": "invoiced"}])
+                                self.odoo.write(PURCHASE_ORDER_MODEL, [new_id], {"invoice_status": "invoiced"})
 
                     log.info("Fila %d: Creado pedido %s", i, xml_id)
                     _emit_progress(
