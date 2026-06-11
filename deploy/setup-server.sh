@@ -18,6 +18,11 @@ NGINX_PORT=80
 
 echo ""
 echo "[1/6] Instalando dependencias del sistema y Node.js..."
+# Limpiar posible conflicto previo de repositorios de Node antes de hacer update
+rm -f /etc/apt/sources.list.d/nodesource.list
+rm -f /etc/apt/sources.list.d/nodesource.sources
+rm -f /usr/share/keyrings/nodesource*
+
 apt-get update -q
 apt-get install -y -q curl git nginx python3 python3-pip python3-venv unixodbc unixodbc-dev
 # Instalar Node.js 20.x
