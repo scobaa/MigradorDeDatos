@@ -304,7 +304,7 @@ class PurchaseOrderMigrator:
                         clean_vals = self.odoo.filter_vals(PURCHASE_ORDER_MODEL, vals)
                         
                         new_id = self.odoo.create(PURCHASE_ORDER_MODEL, clean_vals)
-                        self.odoo.create_xml_id(xml_id, PURCHASE_ORDER_MODEL, new_id)
+                        self.odoo.create_or_update_xml_id(xml_id, PURCHASE_ORDER_MODEL, new_id)
                         
                         # Confirmar
                         if self.options.confirm_orders:
