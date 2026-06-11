@@ -87,7 +87,7 @@ systemctl enable migrador-python
 systemctl start migrador-python
 
 # Nginx
-cat > /etc/nginx/sites-available/migrador << EOF
+cat > /etc/nginx/conf.d/migrador.conf << EOF
 server {
     listen $NGINX_PORT;
     server_name _;
@@ -119,7 +119,7 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/migrador /etc/nginx/sites-enabled/migrador
+rm -f /etc/nginx/conf.d/default.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
