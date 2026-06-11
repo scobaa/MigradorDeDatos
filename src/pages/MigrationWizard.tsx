@@ -1371,7 +1371,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   />
                 </div>
                 <p className="text-[10px] text-muted-foreground text-center animate-pulse">
-                  Procesando lote de `res.partner`...
+                  Procesando lote de datos...
                 </p>
               </div>
             )}

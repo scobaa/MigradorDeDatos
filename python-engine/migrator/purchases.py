@@ -255,7 +255,7 @@ class PurchaseOrderMigrator:
         )
 
         for i, row in enumerate(rows, 1):
-            _emit_progress({"current": i, "total": total, "status": "processing"})
+            _emit_progress({"done": i, "total": total, "status": "processing"})
             try:
                 vals = self._process_row(row, dry_run)
                 
