@@ -11,7 +11,7 @@ export const removeSessionToken = () => {
 };
 
 // Hook simple para la autenticación
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export const useAuth = () => {
   const [token, setTokenState] = useState<string | null>(getSessionToken());
