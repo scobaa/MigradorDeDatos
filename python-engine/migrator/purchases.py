@@ -284,8 +284,17 @@ class PurchaseOrderMigrator:
                             # Confirmar
                             if self.options.confirm_orders:
                                 self.odoo.execute(PURCHASE_ORDER_MODEL, "button_confirm", [existing_id])
+                                # Restaurar fechas originales que button_confirm sobreescribe
+                                if "date_order" in clean_vals:
+                                    self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {
+                                        "date_order": clean_vals["date_order"],
+                                        "date_approve": clean_vals["date_order"]
+                                    })
                                 if self.options.force_invoiced:
-                                    self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {"invoice_status": "invoiced"})
+                                    try:
+                                        self.odoo.write(PURCHASE_ORDER_MODEL, [existing_id], {"force_invoiced": True})
+                                    except Exception as e_fi:
+                                        log.warning("No se pudo marcar force_invoiced en pedido '%s': %s", xml_id, e_fi)
                         
                         log.info("Fila %d: Actualizado pedido %s", i, xml_id)
                         _emit_progress(
@@ -309,8 +318,17 @@ class PurchaseOrderMigrator:
                         # Confirmar
                         if self.options.confirm_orders:
                             self.odoo.execute(PURCHASE_ORDER_MODEL, "button_confirm", [new_id])
+                            # Restaurar fechas originales que button_confirm sobreescribe
+                            if "date_order" in clean_vals:
+                                self.odoo.write(PURCHASE_ORDER_MODEL, [new_id], {
+                                    "date_order": clean_vals["date_order"],
+                                    "date_approve": clean_vals["date_order"]
+                                })
                             if self.options.force_invoiced:
-                                self.odoo.write(PURCHASE_ORDER_MODEL, [new_id], {"invoice_status": "invoiced"})
+                                try:
+                                    self.odoo.write(PURCHASE_ORDER_MODEL, [new_id], {"force_invoiced": True})
+                                except Exception as e_fi:
+                                    log.warning("No se pudo marcar force_invoiced en pedido '%s': %s", xml_id, e_fi)
 
                     log.info("Fila %d: Creado pedido %s", i, xml_id)
                     _emit_progress(
