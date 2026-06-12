@@ -27,7 +27,8 @@ npm run build
 chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
 
 echo ""
-echo "[3/3] Actualizando Python y reiniciando servicio..."
+echo "[3/3] Instalando dependencias del sistema y actualizando Python..."
+apt-get update -qq && apt-get install -y mdbtools
 "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/python-engine/requirements.txt" -q
 systemctl restart migrador-python
 systemctl reload nginx
