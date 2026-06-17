@@ -94,14 +94,8 @@ class AccessConnector:
                 if not row.table_name.startswith("MSys") and row.table_type in ("TABLE", "VIEW")
             ]
         else:
-            res_tables = subprocess.run(["mdb-tables", "-1", "-t", "table", self.path], capture_output=True, text=True, check=True)
-            res_queries = subprocess.run(["mdb-tables", "-1", "-t", "query", self.path], capture_output=True, text=True, check=False)
-            
-            lines = res_tables.stdout.splitlines()
-            if res_queries.returncode == 0:
-                lines.extend(res_queries.stdout.splitlines())
-                
-            tablas = [t.strip() for t in lines if t.strip() and not t.startswith("MSys")]
+            res = subprocess.run(["mdb-tables", "-1", self.path], capture_output=True, text=True, check=True)
+            tablas = [t.strip() for t in res.stdout.splitlines() if t.strip() and not t.startswith("MSys")]
         
         log.info("Tablas encontradas en %s: %s", self.path, tablas)
         return tablas
