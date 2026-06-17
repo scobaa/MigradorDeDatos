@@ -116,12 +116,13 @@ class AccessConnector:
                 raise ValueError(f"La tabla '{table}' no existe o no tiene columnas")
             return cols
         else:
-            proc = subprocess.Popen(["mdb-export", self.path, table], stdout=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(["mdb-export", self.path, table], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             reader = csv.reader(proc.stdout)
             try:
                 cols = next(reader)
             except StopIteration:
-                raise ValueError(f"La tabla '{table}' no existe o no tiene columnas")
+                err_output = proc.stderr.read().strip()
+                raise ValueError(f"La tabla/consulta '{table}' no existe, no tiene columnas, o no es soportada por mdbtools. Error interno: {err_output}")
             proc.terminate()
             return cols
 
