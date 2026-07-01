@@ -59,6 +59,8 @@ _ODOO_MODELS: dict[str, dict[str, str]] = {
         "ref":           "Referencia externa / código en el sistema origen",
         "comment":       "Notas u observaciones internas",
         "is_company":    "True si es empresa, False si es persona física",
+        "type":          "Tipo de dirección: contact, invoice, delivery, other, private",
+        "parent_id":     "Empresa padre (Vincular por NIF, Ref o Nombre de la empresa principal)",
         "customer_rank": "1 si es cliente (0 si no)",
         "supplier_rank": "1 si es proveedor (0 si no)",
         "lang":          "Idioma (ej. es_ES, ca_ES)",
@@ -77,6 +79,12 @@ _ODOO_MODELS: dict[str, dict[str, str]] = {
         "active":         "True si está activo",
         "sale_ok":        "True si se puede vender",
         "purchase_ok":    "True si se puede comprar",
+    },
+    "stock.quant": {
+        "product_id":           "Código del producto (default_code / referencia interna)",
+        "location_id":          "Nombre de la ubicación de almacén (ej. M21/Stock, WH/Stock)",
+        "inventory_quantity":   "Cantidad física contada en el inventario",
+        "__external_id":        "Identificador único externo de la fila (ej. M21_1015100)",
     },
 }
 

@@ -924,6 +924,25 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
               </div>
 
               <div
+                onClick={() => setSelectedModel("stock.quant")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "stock.quant"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Inventario Físico (stock.quant)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Ajusta el stock físico de productos en Odoo. Necesita las columnas: <code>product_id</code>, <code>location_id</code> e <code>inventory_quantity</code>.
+                  </p>
+                </div>
+              </div>
+
+              <div
                 onClick={() => setSelectedModel("account.move.entry")}
                 className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
                   selectedModel === "account.move.entry"

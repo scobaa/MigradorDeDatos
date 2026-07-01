@@ -211,6 +211,20 @@ def transform_partner(
             cleaned = clean_email(raw)
         elif odoo_field in ("phone", "mobile"):
             cleaned = clean_phone(raw, default_country)
+        elif odoo_field == "type":
+            cleaned = clean_str(raw)
+            if cleaned:
+                cl = cleaned.lower()
+                if "entrega" in cl or "envio" in cl or "envío" in cl or "delivery" in cl:
+                    cleaned = "delivery"
+                elif "fact" in cl or "invoice" in cl:
+                    cleaned = "invoice"
+                elif "priva" in cl:
+                    cleaned = "private"
+                elif "otr" in cl or "other" in cl:
+                    cleaned = "other"
+                else:
+                    cleaned = "contact"
         else:
             cleaned = clean_str(raw)
 

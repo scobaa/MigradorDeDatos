@@ -389,6 +389,20 @@ class PartnerMigrator:
                 elif ref and ref in ref_to_id:
                     r["existing_id"] = ref_to_id[ref]
 
+        # 2.5. Resolver parent_id si está mapeado
+        for r in records:
+            parent_key = r["vals"].get("parent_id")
+            if parent_key and not isinstance(parent_key, int):
+                parent_key_str = str(parent_key).strip()
+                # Buscar padre en Odoo por NIF, Ref o Nombre
+                domain = ["|", "|", ("vat", "=", parent_key_str), ("ref", "=", parent_key_str), ("name", "=", parent_key_str)]
+                p_ids = self.odoo.search(PARTNER_MODEL, domain, limit=1)
+                if p_ids:
+                    r["vals"]["parent_id"] = p_ids[0]
+                else:
+                    log.warning("No se encontró empresa padre en Odoo para la clave: %s (Ignorando parent_id en fila %s)", parent_key_str, r["idx"])
+                    r["vals"].pop("parent_id", None)
+
         # 3. Separar en Actualizaciones vs Creaciones
         updates_records = []
         creates_records = []

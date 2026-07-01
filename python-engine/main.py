@@ -618,6 +618,14 @@ def handle_run_migration(args: dict) -> None:
             format_name=opts.get("format_name", True),
         )
         migrator = PurchaseOrderMigrator(odoo, mapping, purchase_opts)
+    elif model == "stock.quant":
+        from migrator.inventory import MigrationOptions as InventoryOptions, InventoryMigrator
+        inv_opts = InventoryOptions(
+            update_existing=opts.get("update_existing", True),
+            apply_inventory=opts.get("apply_inventory", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        )
+        migrator = InventoryMigrator(odoo, mapping, inv_opts)
     else:
         raise ValueError(f"Modelo no soportado para migración: {model}")
 
