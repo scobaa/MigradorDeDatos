@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import {
   ArrowRight, CheckCircle2, AlertCircle, Loader2,
-  Database, Play, RotateCcw, ChevronRight, Wifi, WifiOff,
-  Package, Users, BarChart3, FileText,
+  Play, RotateCcw, ChevronRight, Wifi, WifiOff,
+  Package, Users, BarChart3,
 } from "lucide-react";
 import { callPython } from "../lib/python";
 
@@ -172,7 +172,6 @@ export default function OdooMigration() {
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
 
-  const progressRef = useRef<HTMLDivElement>(null);
 
   // ─── Test de conexión ──────────────────────────────────────────────────────
 
