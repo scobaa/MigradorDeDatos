@@ -88,6 +88,8 @@ def main() -> None:
             handle_db_delete_client(args)
         elif command == "db_update_client_last_used":
             handle_db_update_client_last_used(args)
+        elif command == "run_odoo_migration":
+            handle_run_odoo_migration(args)
         else:
             respond("error", error=f"Comando desconocido: {command}")
 
@@ -843,6 +845,82 @@ def handle_db_update_client_last_used(args: dict) -> None:
         respond("ok", data={"success": success})
     except Exception as e:
         respond("error", error=str(e))
+
+
+def handle_run_odoo_migration(args: dict) -> None:
+    """
+    Ejecuta la migración Odoo → Odoo.
+
+    args: {
+        odoo_source: {url, db, username, password},
+        odoo_dest: {url, db, username, password},
+        model: str,
+        filters?: list,       # dominio Odoo para filtrar origen
+        options?: dict,
+        dry_run?: bool,
+    }
+    """
+    from migrator.odoo_client import OdooClient, OdooConfig
+    from migrator.odoo_source import OdooSourceConnector, MODEL_DEFINITIONS
+
+    src_args = args["odoo_source"]
+    dst_args = args["odoo_dest"]
+    model = args.get("model", "res.partner")
+    filters = args.get("filters") or []
+    opts = args.get("options", {})
+    dry_run = bool(args.get("dry_run", False))
+
+    # 1. Conectar origen
+    odoo_src = OdooClient(OdooConfig(
+        url=src_args["url"], db=src_args["db"],
+        username=src_args["username"], password=src_args["password"],
+    ))
+    odoo_src.connect()
+
+    # 2. Conectar destino
+    odoo_dst = OdooClient(OdooConfig(
+        url=dst_args["url"], db=dst_args["db"],
+        username=dst_args["username"], password=dst_args["password"],
+    ))
+    odoo_dst.connect()
+
+    # 3. Preparar conector de origen
+    connector = OdooSourceConnector(odoo_src, model, batch_size=int(opts.get("batch_size", 100)))
+    total = connector.count(filters)
+    mapping = connector.auto_mapping
+
+    log.info("Migración Odoo→Odoo: modelo=%s, total=%s, dry_run=%s", model, total, dry_run)
+
+    # 4. Instanciar migrador destino según modelo
+    if model == "res.partner":
+        from migrator.partners import MigrationOptions as PartnerOptions, PartnerMigrator
+        migrator = PartnerMigrator(odoo_dst, mapping, PartnerOptions(
+            default_country=opts.get("default_country", "ES"),
+            customer_rank=int(opts.get("customer_rank", 1)),
+            supplier_rank=int(opts.get("supplier_rank", 0)),
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+    elif model == "product.template":
+        from migrator.products import MigrationOptions as ProductOptions, ProductMigrator
+        migrator = ProductMigrator(odoo_dst, mapping, ProductOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+    elif model == "stock.quant":
+        from migrator.inventory import MigrationOptions as InventoryOptions, InventoryMigrator
+        migrator = InventoryMigrator(odoo_dst, mapping, InventoryOptions(
+            update_existing=opts.get("update_existing", True),
+            apply_inventory=opts.get("apply_inventory", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+    else:
+        raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
+
+    # 5. Ejecutar migración
+    rows = connector.iter_rows(filters)
+    stats = migrator.run(rows, total=total, dry_run=dry_run)
+    respond("ok", data={"stats": stats.as_dict(), "total": total})
 
 
 if __name__ == "__main__":
