@@ -112,38 +112,59 @@ class SalesOrderMigrator:
         self._partner_cache[key] = None
         return None
 
-    def _resolve_product(self, product_code: str | None) -> int | None:
+    def _resolve_product(self, product_code: str | None, product_name: str | None = None) -> int | None:
         """Busca el ID del producto (variante) en Odoo."""
-        if not product_code:
+        if not product_code and not product_name:
             return None
 
-        key = str(product_code).strip()
+        key = str(product_code).strip() if product_code else ""
         if key in self._product_cache:
             return self._product_cache[key]
 
         try:
             # 1. Buscar por default_code (SKU)
-            ids = self.odoo.search("product.product", [("default_code", "=", key)])
-            if ids:
-                self._product_cache[key] = ids[0]
-                return ids[0]
+            if key:
+                ids = self.odoo.search("product.product", [("default_code", "=", key)])
+                if ids:
+                    self._product_cache[key] = ids[0]
+                    return ids[0]
 
             # 2. Buscar por XML ID de product.template
-            xml_id = key if key.startswith("art_") else f"art_{key}"
-            tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
-            if tmpl_id:
-                p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
-                if p_ids:
-                    self._product_cache[key] = p_ids[0]
-                    return p_ids[0]
+            if key:
+                xml_id = key if key.startswith("art_") else f"art_{key}"
+                tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
+                if tmpl_id:
+                    p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
+                    if p_ids:
+                        self._product_cache[key] = p_ids[0]
+                        return p_ids[0]
 
             # 3. Buscar por código de barras
-            ids = self.odoo.search("product.product", [("barcode", "=", key)])
-            if ids:
-                self._product_cache[key] = ids[0]
-                return ids[0]
+            if key:
+                ids = self.odoo.search("product.product", [("barcode", "=", key)])
+                if ids:
+                    self._product_cache[key] = ids[0]
+                    return ids[0]
+
+            # 4. Buscar por nombre del producto (ORDER_IDS/NAME)
+            if product_name:
+                name_clean = str(product_name).strip()
+                ids = self.odoo.search("product.product", [("name", "=", name_clean)], limit=1)
+                if ids:
+                    log.info("Producto '%s' no encontrado por código '%s', resuelto por nombre.", name_clean, key)
+                    self._product_cache[key] = ids[0]
+                    return ids[0]
+                # Fallback más permisivo: buscar en product.template por nombre
+                tmpl_ids = self.odoo.search("product.template", [("name", "=", name_clean)], limit=1)
+                if tmpl_ids:
+                    p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
+                    if p_ids:
+                        log.info("Producto '%s' resuelto por nombre en product.template.", name_clean)
+                        self._product_cache[key] = p_ids[0]
+                        return p_ids[0]
+
         except Exception as e:
-            log.warning("Error al resolver producto '%s': %s", key, e)
+            log.warning("Error al resolver producto '%s' / '%s': %s", key, product_name, e)
 
         self._product_cache[key] = None
         return None
@@ -212,7 +233,8 @@ class SalesOrderMigrator:
 
         for line in lines:
             product_code = line.pop("product_code", None)
-            product_id = self._resolve_product(product_code)
+            product_name = line.get("name")  # ORDER_IDS/NAME — usado como fallback de búsqueda
+            product_id = self._resolve_product(product_code, product_name)
 
             line_vals = {
                 "name": line["name"],
