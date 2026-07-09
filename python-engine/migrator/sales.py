@@ -148,18 +148,29 @@ class SalesOrderMigrator:
 
             # 4. Buscar por nombre del producto (ORDER_IDS/NAME)
             if product_name:
-                name_clean = str(product_name).strip()
+                # Normalizar: quitar espacios al inicio/final y colapsar múltiples espacios internos
+                name_clean = " ".join(str(product_name).split())
+
+                # 4a. Coincidencia exacta en product.product
                 ids = self.odoo.search("product.product", [("name", "=", name_clean)], limit=1)
                 if ids:
-                    log.info("Producto '%s' no encontrado por código '%s', resuelto por nombre.", name_clean, key)
+                    log.info("Producto resuelto por nombre exacto: '%s'", name_clean)
                     self._product_cache[key] = ids[0]
                     return ids[0]
-                # Fallback más permisivo: buscar en product.template por nombre
-                tmpl_ids = self.odoo.search("product.template", [("name", "=", name_clean)], limit=1)
+
+                # 4b. Coincidencia case-insensitive (ilike) en product.product
+                ids = self.odoo.search("product.product", [("name", "ilike", name_clean)], limit=1)
+                if ids:
+                    log.info("Producto resuelto por nombre ilike: '%s'", name_clean)
+                    self._product_cache[key] = ids[0]
+                    return ids[0]
+
+                # 4c. ilike en product.template (para productos sin variantes propias)
+                tmpl_ids = self.odoo.search("product.template", [("name", "ilike", name_clean)], limit=1)
                 if tmpl_ids:
                     p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                     if p_ids:
-                        log.info("Producto '%s' resuelto por nombre en product.template.", name_clean)
+                        log.info("Producto resuelto por nombre ilike en product.template: '%s'", name_clean)
                         self._product_cache[key] = p_ids[0]
                         return p_ids[0]
 
