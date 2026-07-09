@@ -699,7 +699,9 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         setMigrationStats({
           created: response.data.stats?.created || 0,
           updated: response.data.stats?.updated || 0,
-          errors: response.data.stats?.errors || 0,
+          skipped: response.data.stats?.skipped || 0,
+          error_count: response.data.stats?.error_count || 0,
+          errors: response.data.stats?.errors || [],
         });
         setIsMigrating(false);
         // Avanzar automáticamente al paso final (6) tras un breve retardo
