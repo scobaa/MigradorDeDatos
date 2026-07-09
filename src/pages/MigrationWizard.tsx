@@ -692,27 +692,34 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         dry_run: isDryRun,
       });
 
-      if (logIntervalId) clearInterval(logIntervalId);
-      if (unlisten) unlisten();
-
       if (response.status === "ok" && response.data) {
+        if (logIntervalId) clearInterval(logIntervalId);
+        if (unlisten) unlisten();
         setProgress(100);
         setMigrationStats({
-          created: response.data.stats.created,
-          updated: response.data.stats.updated,
-          skipped: response.data.stats.skipped,
-          error_count: response.data.stats.error_count,
-          errors: response.data.stats.errors || [],
+          created: response.data.stats?.created || 0,
+          updated: response.data.stats?.updated || 0,
+          errors: response.data.stats?.errors || 0,
         });
         setIsMigrating(false);
         // Avanzar automáticamente al paso final (6) tras un breve retardo
         setTimeout(() => setStep(6), 800);
       } else {
-        alert("Error durante la migración: " + response.error);
+        if (!isTauri && response.error && response.error.includes("motor Python no está disponible")) {
+          setLogs(prev => [...prev, "⚠️ La conexión web principal excedió el tiempo límite (timeout), pero la migración continúa en el servidor. Seguimos recibiendo los logs en directo..."]);
+          return;
+        }
+        if (logIntervalId) clearInterval(logIntervalId);
+        if (unlisten) unlisten();
+        alert("Error durante la migración: " + (response.error || "Desconocido"));
         setIsMigrating(false);
         setProgress(0);
       }
     } catch (e: any) {
+      if (!isTauri && (e.message === "Failed to fetch" || e.name === "TypeError")) {
+        setLogs(prev => [...prev, "⚠️ La conexión web principal excedió el tiempo límite (timeout), pero la migración continúa en el servidor. Seguimos recibiendo los logs en directo..."]);
+        return;
+      }
       if (logIntervalId) clearInterval(logIntervalId);
       if (unlisten) unlisten();
       alert("Error de red o comunicación: " + e.toString());

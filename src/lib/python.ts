@@ -134,7 +134,7 @@ export async function callPython<T = any>(
 
     return {
       status: "error",
-      error: "El puente de Tauri no está disponible en un navegador web convencional.",
+      error: `El motor Python no está disponible (${getPythonApiUrl()}). Para ejecutar migraciones reales, asegúrate de que el servidor Python esté en ejecución.`,
     };
   }
 
