@@ -41,12 +41,14 @@ MODEL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "parent_id": "_parent_name",
         },
         # Mapeo automático origen→destino para el migrador
+        # IMPORTANTE: _country y _state se pasan como texto para que
+        # PartnerMigrator._resolve_geo() los convierta en IDs en el destino.
         "auto_mapping": {
             "name": "name", "vat": "vat", "ref": "ref",
             "email": "email", "phone": "phone", "mobile": "mobile",
             "website": "website", "street": "street", "street2": "street2",
             "city": "city", "zip": "zip",
-            "_country": "country_id", "_state": "state_id",
+            "_country": "_country", "_state": "_state",   # texto → resuelto por _resolve_geo()
             "is_company": "is_company",
             "customer_rank": "customer_rank", "supplier_rank": "supplier_rank",
             "comment": "comment", "lang": "lang",
