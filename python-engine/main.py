@@ -918,8 +918,34 @@ def handle_run_odoo_migration(args: dict) -> None:
         raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
 
     # 5. Ejecutar migración
-    rows = connector.iter_rows(filters)
-    stats = migrator.run(rows, total=total, dry_run=dry_run)
+    if model == "res.partner":
+        # Para res.partner hacemos 2 pasadas para garantizar que las empresas
+        # existen en el destino antes de crear los contactos vinculados a ellas.
+        # Pasada 1: solo empresas (is_company = True)
+        companies_filter = filters + [("is_company", "=", True)]
+        contacts_filter = filters + [("is_company", "=", False)]
+
+        total_companies = connector.count(companies_filter)
+        total_contacts = connector.count(contacts_filter)
+        total = total_companies + total_contacts
+
+        log.info("Pasada 1/2: %s empresas", total_companies)
+        rows_companies = connector.iter_rows(companies_filter)
+        stats = migrator.run(rows_companies, total=total, dry_run=dry_run)
+
+        log.info("Pasada 2/2: %s contactos vinculados", total_contacts)
+        rows_contacts = connector.iter_rows(contacts_filter)
+        stats2 = migrator.run(rows_contacts, total=total_contacts, dry_run=dry_run)
+
+        # Combinar estadísticas de ambas pasadas
+        stats.created += stats2.created
+        stats.updated += stats2.updated
+        stats.skipped += stats2.skipped
+        stats.errors += stats2.errors
+    else:
+        rows = connector.iter_rows(filters)
+        stats = migrator.run(rows, total=total, dry_run=dry_run)
+
     respond("ok", data={"stats": stats.as_dict(), "total": total})
 
 
