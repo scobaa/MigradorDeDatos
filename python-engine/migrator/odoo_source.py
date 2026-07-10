@@ -124,6 +124,25 @@ class OdooSourceConnector:
         """Cuenta los registros del origen que cumplen el dominio."""
         return self.odoo.execute(self.model, "search_count", domain or [])
 
+    def _get_available_fields(self, requested: list[str]) -> list[str]:
+        """
+        Filtra 'requested' contra los campos que realmente existen en el modelo
+        del Odoo origen. Cachea el resultado para no repetir la llamada.
+        """
+        if not hasattr(self, "_available_fields_cache"):
+            try:
+                fields_meta = self.odoo.execute(self.model, "fields_get", [], {"attributes": ["string"]})
+                self._available_fields_cache: set[str] = set(fields_meta.keys())
+            except Exception as e:
+                log.warning("No se pudo obtener la lista de campos del origen (%s): %s. Usando todos.", self.model, e)
+                self._available_fields_cache = set(requested)
+
+        valid = [f for f in requested if f in self._available_fields_cache]
+        skipped = set(requested) - set(valid)
+        if skipped:
+            log.info("Campos no disponibles en el Odoo origen (se omitirán): %s", sorted(skipped))
+        return valid
+
     def iter_rows(
         self, domain: list | None = None
     ) -> Generator[dict[str, Any], None, None]:
@@ -132,7 +151,8 @@ class OdooSourceConnector:
         con Many2one resueltos como texto (para que el destino los busque por nombre).
         """
         domain = domain or []
-        fields = self._defn["fields"]
+        # Filtrar solo los campos que existen realmente en el Odoo origen
+        fields = self._get_available_fields(self._defn["fields"])
         many2one_map = self._defn.get("many2one", {})
 
         offset = 0
