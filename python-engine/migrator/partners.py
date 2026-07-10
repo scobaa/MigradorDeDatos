@@ -425,7 +425,10 @@ class PartnerMigrator:
                 try:
                     update_vals = {
                         k: v for k, v in r["vals"].items()
-                        if k not in ("customer_rank", "supplier_rank")
+                        if k not in ("customer_rank", "supplier_rank", "parent_id")
+                        # parent_id se excluye en actualizaciones: si el registro ya existe
+                        # en el destino, Odoo puede lanzar "recursive Partner hierarchies"
+                        # al intentar reasignar la empresa padre.
                     }
                     self.odoo.write(PARTNER_MODEL, [r["existing_id"]], update_vals)
                 except Exception as e:
