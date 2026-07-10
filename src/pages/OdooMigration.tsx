@@ -5,6 +5,8 @@ import {
   Package, Users, BarChart3,
 } from "lucide-react";
 import { callPython } from "../lib/python";
+import { useClients } from "../hooks/useClients";
+import { DBClient } from "../lib/db";
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -78,6 +80,7 @@ function CredentialsForm({
   testStatus,
   onTest,
   testing,
+  clients,
 }: {
   label: string;
   value: OdooCredentials;
@@ -85,13 +88,31 @@ function CredentialsForm({
   testStatus: "idle" | "ok" | "error";
   onTest: () => void;
   testing: boolean;
+  clients: DBClient[];
 }) {
   const inputClass =
     "w-full bg-secondary/50 border border-border rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 transition";
 
+  const handleClientSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const clientId = e.target.value;
+    if (!clientId) {
+      // Manual
+      return;
+    }
+    const client = clients.find(c => c.id === clientId);
+    if (client) {
+      onChange({
+        url: client.odoo_url,
+        db: client.odoo_db,
+        username: client.odoo_user,
+        password: client.odoo_password || "",
+      });
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-bold text-white">{label}</h3>
         <button
           onClick={onTest}
@@ -112,6 +133,20 @@ function CredentialsForm({
           {testStatus === "ok" ? "Conectado" : testStatus === "error" ? "Error" : "Probar"}
         </button>
       </div>
+
+      {clients.length > 0 && (
+        <select
+          onChange={handleClientSelect}
+          className="w-full bg-secondary/50 border border-border rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-primary/50 cursor-pointer appearance-none"
+          defaultValue=""
+        >
+          <option value="" disabled>Seleccionar cliente guardado...</option>
+          {clients.map(c => (
+            <option key={c.id} value={c.id}>{c.name} ({c.odoo_db})</option>
+          ))}
+          <option value="">Introducir manualmente</option>
+        </select>
+      )}
 
       <div className="grid grid-cols-1 gap-2">
         <input
@@ -161,6 +196,7 @@ function CredentialsForm({
 
 export default function OdooMigration() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const { clients } = useClients();
 
   // Credenciales
   const [srcCreds, setSrcCreds] = useState<OdooCredentials>(() => loadCredentials("odoo_mig_src_creds"));
@@ -315,6 +351,7 @@ export default function OdooMigration() {
                 testStatus={srcTestStatus}
                 onTest={() => testConnection(srcCreds, setSrcTestStatus, setSrcTesting)}
                 testing={srcTesting}
+                clients={clients}
               />
             </div>
             <div className="bg-secondary/20 border border-border rounded-2xl p-5">
@@ -325,6 +362,7 @@ export default function OdooMigration() {
                 testStatus={dstTestStatus}
                 onTest={() => testConnection(dstCreds, setDstTestStatus, setDstTesting)}
                 testing={dstTesting}
+                clients={clients}
               />
             </div>
           </div>

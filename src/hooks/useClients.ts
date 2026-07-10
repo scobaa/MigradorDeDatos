@@ -46,6 +46,20 @@ export function useClients() {
     }
   };
 
+  const updateClient = async (
+    id: string,
+    client: Omit<DBClient, "id" | "created_at" | "last_used_at">
+  ): Promise<DBClient> => {
+    try {
+      const updatedClient = await db.updateClient(id, client);
+      setClients((prev) => prev.map((c) => (c.id === id ? updatedClient : c)));
+      return updatedClient;
+    } catch (err: any) {
+      setError(err?.toString() || "Error al actualizar el cliente.");
+      throw err;
+    }
+  };
+
   const updateClientLastUsed = async (id: string): Promise<void> => {
     try {
       await db.updateClientLastUsed(id);
@@ -63,6 +77,7 @@ export function useClients() {
     error,
     addClient,
     deleteClient,
+    updateClient,
     updateClientLastUsed,
     refreshClients: fetchClients,
   };

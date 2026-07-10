@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Database, Globe, Play, Trash2, CheckCircle2, XCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { Plus, Database, Globe, Play, Trash2, CheckCircle2, XCircle, AlertCircle, RefreshCw, Edit } from "lucide-react";
 import { callPython } from "../lib/python";
 import { useClients } from "../hooks/useClients";
 
@@ -8,10 +8,11 @@ interface ClientListProps {
 }
 
 export default function ClientList({ onSelectClient }: ClientListProps) {
-  const { clients, loading, addClient, deleteClient } = useClients();
+  const { clients, loading, addClient, deleteClient, updateClient } = useClients();
   const [connectionStatuses, setConnectionStatuses] = useState<Record<string, "idle" | "connected" | "error">>({});
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [newClient, setNewClient] = useState({
     name: "",
     odoo_url: "",
@@ -23,6 +24,24 @@ export default function ClientList({ onSelectClient }: ClientListProps) {
   const [testingConnection, setTestingConnection] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const openAddModal = () => {
+    setEditingClientId(null);
+    setNewClient({ name: "", odoo_url: "", odoo_db: "", odoo_user: "", odoo_password: "" });
+    setShowAddModal(true);
+  };
+
+  const openEditModal = (client: any) => {
+    setEditingClientId(client.id);
+    setNewClient({
+      name: client.name,
+      odoo_url: client.odoo_url,
+      odoo_db: client.odoo_db,
+      odoo_user: client.odoo_user,
+      odoo_password: client.odoo_password || "",
+    });
+    setShowAddModal(true);
+  };
+
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClient.name || !newClient.odoo_url || !newClient.odoo_db || !newClient.odoo_user || !newClient.odoo_password) {
@@ -32,13 +51,23 @@ export default function ClientList({ onSelectClient }: ClientListProps) {
 
     setIsSaving(true);
     try {
-      await addClient({
-        name: newClient.name,
-        odoo_url: newClient.odoo_url,
-        odoo_db: newClient.odoo_db,
-        odoo_user: newClient.odoo_user,
-        odoo_password: newClient.odoo_password,
-      });
+      if (editingClientId) {
+        await updateClient(editingClientId, {
+          name: newClient.name,
+          odoo_url: newClient.odoo_url,
+          odoo_db: newClient.odoo_db,
+          odoo_user: newClient.odoo_user,
+          odoo_password: newClient.odoo_password,
+        });
+      } else {
+        await addClient({
+          name: newClient.name,
+          odoo_url: newClient.odoo_url,
+          odoo_db: newClient.odoo_db,
+          odoo_user: newClient.odoo_user,
+          odoo_password: newClient.odoo_password,
+        });
+      }
       setNewClient({
         name: "",
         odoo_url: "",
@@ -96,7 +125,7 @@ export default function ClientList({ onSelectClient }: ClientListProps) {
           </p>
         </div>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={openAddModal}
           className="flex items-center gap-2 gradient-button text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg transition-all duration-300 text-sm"
         >
           <Plus className="w-4 h-4" />
@@ -180,6 +209,14 @@ export default function ClientList({ onSelectClient }: ClientListProps) {
                     </button>
                     
                     <button
+                      onClick={() => openEditModal(client)}
+                      className="p-2 text-blue-400 hover:text-blue-300 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/10 rounded-lg transition duration-150"
+                      title="Editar"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+                    
+                    <button
                       onClick={() => handleDeleteClient(client.id)}
                       className="p-2 text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 rounded-lg transition duration-150"
                       title="Eliminar"
@@ -207,7 +244,7 @@ export default function ClientList({ onSelectClient }: ClientListProps) {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border max-w-lg w-full rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4">
             <div>
-              <h2 className="text-xl font-bold text-white">Registrar Servidor Odoo</h2>
+              <h2 className="text-xl font-bold text-white">{editingClientId ? "Editar Servidor Odoo" : "Registrar Servidor Odoo"}</h2>
               <p className="text-muted-foreground text-xs mt-1">
                 La contraseña se almacenará de manera cifrada en la base de datos local.
               </p>

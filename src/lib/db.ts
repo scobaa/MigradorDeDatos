@@ -73,6 +73,11 @@ export const db = {
     await callBackend("db_delete_client", { client_id: id });
   },
 
+  async updateClient(id: string, client: Omit<DBClient, "id" | "created_at" | "last_used_at">): Promise<DBClient> {
+    const data = await callBackend("db_update_client", { client_id: id, client });
+    return data.client;
+  },
+
   async updateClientLastUsed(id: string): Promise<void> {
     try {
       await callBackend("db_update_client_last_used", { client_id: id });

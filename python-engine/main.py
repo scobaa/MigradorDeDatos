@@ -84,6 +84,8 @@ def main() -> None:
             handle_db_get_clients(args)
         elif command == "db_add_client":
             handle_db_add_client(args)
+        elif command == "db_update_client":
+            handle_db_update_client(args)
         elif command == "db_delete_client":
             handle_db_delete_client(args)
         elif command == "db_update_client_last_used":
@@ -826,6 +828,14 @@ def handle_db_add_client(args: dict) -> None:
     import db_manager
     try:
         client = db_manager.add_client(args.get("token"), args.get("client", {}))
+        respond("ok", data={"client": client})
+    except Exception as e:
+        respond("error", error=str(e))
+
+def handle_db_update_client(args: dict) -> None:
+    import db_manager
+    try:
+        client = db_manager.update_client(args.get("token"), args.get("client_id"), args.get("client", {}))
         respond("ok", data={"client": client})
     except Exception as e:
         respond("error", error=str(e))

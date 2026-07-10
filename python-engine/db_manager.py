@@ -188,6 +188,33 @@ def add_client(token: str, client_data: dict) -> dict:
     finally:
         conn.close()
 
+def update_client(token: str, client_id: str, client_data: dict) -> dict:
+    user_id = get_user_id(token)
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            UPDATE clients 
+            SET name = ?, odoo_url = ?, odoo_db = ?, odoo_user = ?, odoo_password = ?
+            WHERE id = ? AND user_id = ?
+        ''', (
+            client_data.get("name", "Sin Nombre"),
+            client_data.get("odoo_url", ""),
+            client_data.get("odoo_db", ""),
+            client_data.get("odoo_user", ""),
+            client_data.get("odoo_password", ""),
+            client_id, user_id
+        ))
+        conn.commit()
+        
+        if cur.rowcount == 0:
+            raise ValueError("Cliente no encontrado o sin permisos")
+            
+        cur.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
+        return dict(cur.fetchone())
+    finally:
+        conn.close()
+
 def delete_client(token: str, client_id: str) -> bool:
     user_id = get_user_id(token)
     conn = get_db()
