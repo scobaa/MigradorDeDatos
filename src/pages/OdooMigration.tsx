@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowRight, CheckCircle2, AlertCircle, Loader2,
   Play, RotateCcw, ChevronRight, Wifi, WifiOff,
@@ -58,6 +58,16 @@ const MODELS = [
 const emptyCredentials = (): OdooCredentials => ({
   url: "", db: "", username: "", password: "",
 });
+
+const loadCredentials = (key: string): OdooCredentials => {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {
+    console.error(`Error al cargar ${key} desde localStorage:`, e);
+  }
+  return emptyCredentials();
+};
 
 // ─── Subcomponente: formulario de credenciales ───────────────────────────────
 
@@ -153,8 +163,16 @@ export default function OdooMigration() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Credenciales
-  const [srcCreds, setSrcCreds] = useState<OdooCredentials>(emptyCredentials());
-  const [dstCreds, setDstCreds] = useState<OdooCredentials>(emptyCredentials());
+  const [srcCreds, setSrcCreds] = useState<OdooCredentials>(() => loadCredentials("odoo_mig_src_creds"));
+  const [dstCreds, setDstCreds] = useState<OdooCredentials>(() => loadCredentials("odoo_mig_dst_creds"));
+  
+  useEffect(() => {
+    localStorage.setItem("odoo_mig_src_creds", JSON.stringify(srcCreds));
+  }, [srcCreds]);
+
+  useEffect(() => {
+    localStorage.setItem("odoo_mig_dst_creds", JSON.stringify(dstCreds));
+  }, [dstCreds]);
   const [srcTestStatus, setSrcTestStatus] = useState<"idle" | "ok" | "error">("idle");
   const [dstTestStatus, setDstTestStatus] = useState<"idle" | "ok" | "error">("idle");
   const [srcTesting, setSrcTesting] = useState(false);
