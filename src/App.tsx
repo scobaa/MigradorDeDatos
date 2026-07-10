@@ -101,7 +101,7 @@ export default function App() {
               Perfiles Clientes
             </button>
 
-            <button
+            {/* <button
               onClick={() => {
                 setActivePage("templates");
                 setSidebarOpen(false);
@@ -114,7 +114,7 @@ export default function App() {
             >
               <Layers className="w-4 h-4" />
               Plantillas Mapeo
-            </button>
+            </button> */}
 
             <button
               onClick={() => {
