@@ -4,7 +4,7 @@ import ClientList from "./pages/ClientList";
 import MigrationWizard from "./pages/MigrationWizard";
 import Templates from "./pages/Templates";
 import OdooMigration from "./pages/OdooMigration";
-import { Database, Layers, LogOut, KeyRound, Menu, X, Cloud, ArrowRightLeft } from "lucide-react";
+import { Database, LogOut, KeyRound, Menu, X, Cloud, ArrowRightLeft } from "lucide-react";
 import { useAuth } from "./lib/auth";
 
 type ActivePage = "clients" | "templates" | "odoo-migration" | { type: "migrate"; clientId: string };
@@ -101,20 +101,6 @@ export default function App() {
               Perfiles Clientes
             </button>
 
-            {/* <button
-              onClick={() => {
-                setActivePage("templates");
-                setSidebarOpen(false);
-              }}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all ${
-                activePage === "templates"
-                  ? "bg-primary/10 text-primary border border-primary/20"
-                  : "text-muted-foreground hover:text-white hover:bg-secondary/40 border border-transparent"
-              }`}
-            >
-              <Layers className="w-4 h-4" />
-              Plantillas Mapeo
-            </button> */}
 
             <button
               onClick={() => {
