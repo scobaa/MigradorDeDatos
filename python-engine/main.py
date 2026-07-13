@@ -488,6 +488,9 @@ def handle_preview_migration(args: dict) -> None:
                                 row_with_lines["_lines"] = []
 
                         vals = transform_purchase_order(row_with_lines, mapping, format_name=options.get("format_name", True))
+                    elif model == "account.account":
+                        from transformers.accounts import transform_row as transform_account
+                        vals = transform_account(row, mapping)
                     else:
                         raise ValueError(f"Modelo no soportado para vista previa: {model}")
                     results.append({"ok": True, "data": vals})
@@ -630,6 +633,13 @@ def handle_run_migration(args: dict) -> None:
             batch_size=int(opts.get("batch_size", 100)),
         )
         migrator = InventoryMigrator(odoo, mapping, inv_opts)
+    elif model == "account.account":
+        from migrator.accounts import MigrationOptions as AccountOptions, AccountMigrator
+        account_opts = AccountOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        )
+        migrator = AccountMigrator(odoo, mapping, account_opts)
     else:
         raise ValueError(f"Modelo no soportado para migración: {model}")
 
@@ -926,10 +936,11 @@ def handle_run_odoo_migration(args: dict) -> None:
         ))
     elif model == "account.account":
         from migrator.accounts import MigrationOptions as AccountOptions, AccountMigrator
-        migrator = AccountMigrator(odoo_dst, mapping, AccountOptions(
+        account_opts = AccountOptions(
             update_existing=opts.get("update_existing", True),
             batch_size=int(opts.get("batch_size", 100)),
-        ))
+        )
+        migrator = AccountMigrator(odoo_dst, mapping, account_opts)
     else:
         raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
 

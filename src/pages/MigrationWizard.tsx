@@ -970,6 +970,25 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                 </div>
               </div>
 
+              <div
+                onClick={() => setSelectedModel("account.account")}
+                className={`p-5 rounded-xl border cursor-pointer transition flex gap-4 ${
+                  selectedModel === "account.account"
+                    ? "border-primary bg-primary/5 shadow-md shadow-primary/5"
+                    : "border-border hover:border-muted-foreground/30 bg-secondary/20"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-white">Plan Contable (account.account)</h4>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Capa `account.account`. Importa cuentas contables (F_CUE) asegurando no duplicar códigos existentes.
+                  </p>
+                </div>
+              </div>
+
               {[
                 { name: "stock.quant", label: "Stock Inicial (Quants)", desc: "Capa `stock.quant`. Ajustes de inventario por almacén. (Próximamente)" },
               ].map((m) => (

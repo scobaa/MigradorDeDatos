@@ -86,6 +86,17 @@ _ODOO_MODELS: dict[str, dict[str, str]] = {
         "inventory_quantity":   "Cantidad física contada en el inventario",
         "__external_id":        "Identificador único externo de la fila (ej. M21_1015100)",
     },
+    "account.account": {
+        "code": "Código de la cuenta contable",
+        "name": "Nombre de la cuenta contable",
+        "account_type": "Tipo de cuenta (asset, liability, equity, income, expense)",
+        "internal_group": "Grupo interno",
+        "internal_type": "Tipo interno",
+        "user_type_id": "Tipo de cuenta (versiones antiguas de Odoo)",
+        "deprecated": "True si está obsoleta",
+        "reconcile": "True si permite conciliación",
+        "note": "Notas u observaciones",
+    },
 }
 
 _KNOWN_ERPS: dict[str, dict] = {
