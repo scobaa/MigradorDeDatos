@@ -924,6 +924,12 @@ def handle_run_odoo_migration(args: dict) -> None:
             apply_inventory=opts.get("apply_inventory", True),
             batch_size=int(opts.get("batch_size", 100)),
         ))
+    elif model == "account.account":
+        from migrator.accounts import MigrationOptions as AccountOptions, AccountMigrator
+        migrator = AccountMigrator(odoo_dst, mapping, AccountOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
     else:
         raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
 

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   ArrowRight, CheckCircle2, AlertCircle, Loader2,
   Play, RotateCcw, ChevronRight, Wifi, WifiOff,
-  Package, Users, BarChart3,
+  Package, Users, BarChart3, Database,
 } from "lucide-react";
 import { callPython } from "../lib/python";
 import { useClients } from "../hooks/useClients";
@@ -54,6 +54,13 @@ const MODELS = [
     sublabel: "Stock físico por ubicación",
     icon: BarChart3,
     color: "from-emerald-500 to-teal-600",
+  },
+  {
+    id: "account.account",
+    label: "Plan Contable",
+    sublabel: "Cuentas contables",
+    icon: Database,
+    color: "from-orange-500 to-amber-600",
   },
 ];
 

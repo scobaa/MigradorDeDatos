@@ -99,6 +99,19 @@ MODEL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "ref": "ref", "narration": "narration",
         },
     },
+    "account.account": {
+        "fields": [
+            "code", "name", "account_type", "deprecated", "reconcile", "note",
+            "internal_group", "internal_type", "user_type_id"
+        ],
+        "many2one": {},
+        "auto_mapping": {
+            "code": "code", "name": "name", "account_type": "account_type",
+            "deprecated": "deprecated", "reconcile": "reconcile", "note": "note",
+            "internal_group": "internal_group", "internal_type": "internal_type",
+            "user_type_id": "user_type_id"
+        },
+    },
 }
 
 
