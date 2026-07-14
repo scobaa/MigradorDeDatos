@@ -62,9 +62,8 @@ class OdooOrderMigrator:
                 stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
                 continue
 
-            vals = self.base_migrator.transform_row(header)
-
-            partner_name = vals.get("partner_id")
+            partner_val = header.get("partner_id")
+            partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
             partner_id = self.base_migrator._resolve_partner(partner_name)
             if not partner_id:
                 log.warning("Pedido Venta %s (%s): Partner '%s' no encontrado. Ignorado.", idx, name, partner_name)
@@ -118,9 +117,9 @@ class OdooOrderMigrator:
 
             order_vals = {
                 "partner_id": partner_id,
-                "date_order": vals.get("date_order"),
-                "client_order_ref": vals.get("client_order_ref"),
-                "note": vals.get("note"),
+                "date_order": header.get("date_order"),
+                "client_order_ref": header.get("client_order_ref"),
+                "note": header.get("note"),
                 "order_line": odoo_lines,
             }
             if name and name != "/":
@@ -190,9 +189,8 @@ class OdooOrderMigrator:
                 stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
                 continue
 
-            vals = self.base_migrator.transform_row(header)
-
-            partner_name = vals.get("partner_id")
+            partner_val = header.get("partner_id")
+            partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
             partner_id = self.base_migrator._resolve_partner(partner_name)
             if not partner_id:
                 log.warning("Pedido Compra %s (%s): Partner '%s' no encontrado. Ignorado.", idx, name, partner_name)
@@ -245,9 +243,9 @@ class OdooOrderMigrator:
 
             order_vals = {
                 "partner_id": partner_id,
-                "date_order": vals.get("date_order"),
-                "partner_ref": vals.get("partner_ref"),
-                "notes": vals.get("notes"),
+                "date_order": header.get("date_order"),
+                "partner_ref": header.get("partner_ref"),
+                "notes": header.get("notes"),
                 "order_line": odoo_lines,
             }
             if name and name != "/":

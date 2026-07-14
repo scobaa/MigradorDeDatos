@@ -51,10 +51,8 @@ class OdooInvoiceMigrator(InvoiceMigrator):
                 stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
                 continue
 
-            vals = self.transform_row(header)
-            
-            # 2. Construir la cabecera + líneas para crear en destino
-            partner_name = vals.get("partner_id")
+            partner_val = header.get("partner_id")
+            partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
             partner_id = self._resolve_partner(partner_name)
             if not partner_id:
                 log.warning("Factura %s (%s): Partner '%s' no encontrado. Ignorada.", idx, name, partner_name)
@@ -112,10 +110,10 @@ class OdooInvoiceMigrator(InvoiceMigrator):
             invoice_vals = {
                 "move_type": self.move_type,
                 "partner_id": partner_id,
-                "invoice_date": vals.get("invoice_date"),
-                "invoice_date_due": vals.get("invoice_date_due"),
-                "ref": vals.get("ref"),
-                "narration": vals.get("narration"),
+                "invoice_date": header.get("invoice_date"),
+                "invoice_date_due": header.get("invoice_date_due"),
+                "ref": header.get("ref"),
+                "narration": header.get("narration"),
                 "invoice_line_ids": odoo_lines,
             }
             if self.options.format_name and name and name != "/":
