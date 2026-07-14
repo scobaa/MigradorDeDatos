@@ -596,16 +596,20 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     let unlisten: (() => void) | null = null;
     let isFinished = false;
     let continuePolling = false;
+    let logOffset = 0;
 
     if (!isTauri) {
       logIntervalId = setInterval(async () => {
         try {
           const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://127.0.0.1:8000' : '';
-          const res = await fetch(`${apiBase}/api/logs`);
+          const res = await fetch(`${apiBase}/api/logs?offset=${logOffset}`);
           if (res.ok) {
             const data = await res.json();
             if (data && data.logs) {
               const rawLogs: string[] = data.logs;
+              if (data.next_offset !== undefined) {
+                logOffset = data.next_offset;
+              }
               const displayLogs: string[] = [];
               let lastProgress: { done: number; total: number } | null = null;
 
@@ -657,7 +661,9 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                 displayLogs.push(line);
               }
 
-              setLogs(displayLogs);
+              if (displayLogs.length > 0) {
+                setLogs(prev => [...prev, ...displayLogs]);
+              }
               if (lastProgress) {
                 setMigrationProgress(lastProgress);
                 const pct = Math.round((lastProgress.done / lastProgress.total) * 100);

@@ -327,6 +327,8 @@ export default function OdooMigration() {
 
     let isFinished = false;
     let continuePolling = false;
+    let logOffset = 0;
+    let lastDone = 0, lastTotal = 0, lastModel = "";
 
     // Polling de progreso desde /api/logs (igual que en MigrationWizard)
     const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -334,11 +336,14 @@ export default function OdooMigration() {
     const logIntervalId = setInterval(async () => {
       if (isFinished) return;
       try {
-        const res = await fetch(`${apiBase}/api/logs`);
+        const res = await fetch(`${apiBase}/api/logs?offset=${logOffset}`);
         if (res.ok) {
           const data = await res.json();
           const rawLogs: string[] = data.logs ?? [];
-          let lastDone = 0, lastTotal = 0, lastModel = "";
+          if (data.next_offset !== undefined) {
+            logOffset = data.next_offset;
+          }
+          
           for (const line of rawLogs) {
             const trimmed = line.trim();
             if (trimmed.includes("__FINAL_RESPONSE__: ")) {
