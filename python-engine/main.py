@@ -49,7 +49,14 @@ def respond(status: str, data: Any = None, error: str | None = None) -> None:
         payload["data"] = data
     if error:
         payload["error"] = error
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False, default=str))
+        
+    payload_json = json.dumps(payload, ensure_ascii=False, default=str)
+    # Emitir por stderr para que el polling de logs pueda rescatar la respuesta
+    # si el proxy (Nginx) corta la conexión HTTP principal por timeout (60s).
+    sys.stderr.write(f"__FINAL_RESPONSE__: {payload_json}\n")
+    sys.stderr.flush()
+    
+    sys.stdout.write(payload_json)
     sys.stdout.flush()
 
 

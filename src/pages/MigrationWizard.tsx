@@ -594,6 +594,8 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
     const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== "undefined";
     let logIntervalId: any = null;
     let unlisten: (() => void) | null = null;
+    let isFinished = false;
+    let continuePolling = false;
 
     if (!isTauri) {
       logIntervalId = setInterval(async () => {
@@ -609,6 +611,32 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
 
               for (const line of rawLogs) {
                 const trimmed = line.trim();
+                
+                if (trimmed.includes("__FINAL_RESPONSE__: ")) {
+                  try {
+                    const finalPayload = JSON.parse(trimmed.split("__FINAL_RESPONSE__: ")[1]);
+                    if (!isFinished) {
+                      isFinished = true;
+                      if (logIntervalId) clearInterval(logIntervalId);
+                      if (finalPayload.status === "ok") {
+                        setProgress(100);
+                        setMigrationStats({
+                          created: finalPayload.data?.stats?.created || 0,
+                          updated: finalPayload.data?.stats?.updated || 0,
+                          skipped: finalPayload.data?.stats?.skipped || 0,
+                          error_count: finalPayload.data?.stats?.error_count || 0,
+                          errors: finalPayload.data?.stats?.errors || [],
+                        });
+                        setMigrationError(null);
+                      } else {
+                        setMigrationError(finalPayload.error || "Error desconocido");
+                      }
+                      setMigrating(false);
+                    }
+                  } catch { /* ignorar */ }
+                  continue;
+                }
+
                 if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
                   try {
                     const parsed = JSON.parse(trimmed);
@@ -649,7 +677,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
             setLogs((prev) => [...prev, line.trim()]);
           },
           (progressPayload: any) => {
-            if (progressPayload.total > 0) {
+            if (progressPayload.total > 0 && !isFinished) {
               setMigrationProgress({ done: progressPayload.done, total: progressPayload.total });
               const pct = Math.round((progressPayload.done / progressPayload.total) * 100);
               setProgress(Math.min(pct, 99));
@@ -692,6 +720,8 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         dry_run: isDryRun,
       });
 
+      if (isFinished) return;
+
       if (response.status === "ok" && response.data) {
         if (logIntervalId) clearInterval(logIntervalId);
         if (unlisten) unlisten();
@@ -703,22 +733,12 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           error_count: response.data.stats?.error_count || 0,
           errors: response.data.stats?.errors || [],
         });
+        setMigrationError(null);
         setIsMigrating(false);
-        // Avanzar automáticamente al paso final (6) tras un breve retardo
         setTimeout(() => setStep(6), 800);
-      } else {
-        if (!isTauri && response.error && response.error.includes("motor Python no está disponible")) {
-          setLogs(prev => [...prev, "⚠️ La conexión web principal excedió el tiempo límite (timeout), pero la migración continúa en el servidor. Seguimos recibiendo los logs en directo..."]);
-          return;
-        }
-        if (logIntervalId) clearInterval(logIntervalId);
-        if (unlisten) unlisten();
-        alert("Error durante la migración: " + (response.error || "Desconocido"));
-        setIsMigrating(false);
-        setProgress(0);
-      }
-    } catch (e: any) {
-      if (!isTauri && (e.message === "Failed to fetch" || e.name === "TypeError")) {
+      } else if (response.status === "error" && response.error?.includes("motor Python no está disponible")) {
+        // Nginx timeout, continue polling
+        continuePolling = true;
         setLogs(prev => [...prev, "⚠️ La conexión web principal excedió el tiempo límite (timeout), pero la migración continúa en el servidor. Seguimos recibiendo los logs en directo..."]);
         return;
       }

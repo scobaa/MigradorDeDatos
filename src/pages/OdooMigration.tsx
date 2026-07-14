@@ -323,13 +323,16 @@ export default function OdooMigration() {
     setProgressLabel("");
     setStats(null);
     setPerModelStats(null);
-    setMigrationError(null);
     setStep(3);
+
+    let isFinished = false;
+    let continuePolling = false;
 
     // Polling de progreso desde /api/logs (igual que en MigrationWizard)
     const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://127.0.0.1:8000' : '';
     const logIntervalId = setInterval(async () => {
+      if (isFinished) return;
       try {
         const res = await fetch(`${apiBase}/api/logs`);
         if (res.ok) {
@@ -338,6 +341,28 @@ export default function OdooMigration() {
           let lastDone = 0, lastTotal = 0, lastModel = "";
           for (const line of rawLogs) {
             const trimmed = line.trim();
+            if (trimmed.includes("__FINAL_RESPONSE__: ")) {
+              try {
+                const finalPayload = JSON.parse(trimmed.split("__FINAL_RESPONSE__: ")[1]);
+                if (!isFinished) {
+                  isFinished = true;
+                  clearInterval(logIntervalId);
+                  if (finalPayload.status === "ok") {
+                    setProgressNum(100);
+                    setProgressLabel("");
+                    setStats(finalPayload.data?.stats ?? null);
+                    setTotal(finalPayload.data?.total ?? 0);
+                    if (finalPayload.data?.per_model) {
+                      setPerModelStats(finalPayload.data.per_model);
+                    }
+                  } else {
+                    setMigrationError(finalPayload.error || "Error desconocido");
+                  }
+                  setRunning(false);
+                }
+              } catch { /* ignorar */ }
+              continue;
+            }
             if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
               try {
                 const parsed = JSON.parse(trimmed);
@@ -349,7 +374,7 @@ export default function OdooMigration() {
               } catch { /* ignorar */ }
             }
           }
-          if (lastTotal > 0) {
+          if (lastTotal > 0 && !isFinished) {
             setProgressNum(Math.min(Math.round((lastDone / lastTotal) * 100), 99));
             if (lastModel) setProgressLabel(MODEL_LABELS[lastModel] ?? lastModel);
           }
@@ -366,6 +391,8 @@ export default function OdooMigration() {
         options: { update_existing: updateExisting },
       });
 
+      if (isFinished) return;
+
       clearInterval(logIntervalId);
 
       if (res.status === "ok") {
@@ -376,14 +403,22 @@ export default function OdooMigration() {
         if (res.data.per_model) {
           setPerModelStats(res.data.per_model);
         }
+      } else if (res.status === "error" && res.error?.includes("motor Python no está disponible")) {
+        // Es muy probable que el proxy (Nginx) haya cortado la conexión por timeout (60s)
+        // ya que "Migrar Todo" tarda varios minutos. No detenemos el polling.
+        continuePolling = true;
+        return;
       } else {
         setMigrationError(res.error || "Error desconocido");
       }
     } catch (e: any) {
+      if (isFinished) return;
       setMigrationError(String(e));
     } finally {
-      clearInterval(logIntervalId);
-      setRunning(false);
+      if (!isFinished && !continuePolling) {
+        clearInterval(logIntervalId);
+        setRunning(false);
+      }
     }
   };
 
