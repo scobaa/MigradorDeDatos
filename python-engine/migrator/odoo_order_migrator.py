@@ -53,7 +53,7 @@ class OdooOrderMigrator:
                         "sale.order.line",
                         "read",
                         line_ids,
-                        ["product_id", "name", "product_uom_qty", "price_unit", "discount", "tax_id", "display_type"]
+                        ["product_id", "name", "product_uom_qty", "price_unit", "discount", "tax_ids", "display_type"]
                     )
             except Exception as e:
                 log.warning("Pedido Venta %s (%s): Error leyendo líneas: %s", idx, name, e)
@@ -91,15 +91,15 @@ class OdooOrderMigrator:
                 
                 prod_id = self.base_migrator._resolve_product(product_code)
                 
-                tax_ids = []
-                src_tax_ids = line.get("tax_id", [])
+                tax_ids_list = []
+                src_tax_ids = line.get("tax_ids", [])
                 if src_tax_ids:
                     try:
                         src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
                         for st in src_taxes:
                             t_id = self.base_migrator._resolve_tax(st.get("name"), tax_use="sale")
                             if t_id:
-                                tax_ids.append((4, t_id))
+                                tax_ids_list.append((4, t_id))
                     except Exception as e:
                         log.warning("Pedido Venta %s (%s): Error leyendo impuestos: %s", idx, name, e)
 
@@ -108,7 +108,7 @@ class OdooOrderMigrator:
                     "product_uom_qty": line.get("product_uom_qty", 1),
                     "price_unit": line.get("price_unit", 0),
                     "discount": line.get("discount", 0),
-                    "tax_id": tax_ids,
+                    "tax_ids": tax_ids_list,
                 }
                 if prod_id:
                     line_vals["product_id"] = prod_id

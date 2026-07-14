@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ArrowRight, CheckCircle2, AlertCircle, Loader2,
   Play, RotateCcw, ChevronRight, Wifi, WifiOff,
@@ -287,6 +287,7 @@ export default function OdooMigration() {
   const [running, setRunning] = useState(false);
   const [progressNum, setProgressNum] = useState(0);
   const [progressLabel, setProgressLabel] = useState("");
+  const [logs, setLogs] = useState<string[]>([]);
   const [stats, setStats] = useState<MigrationStats | null>(null);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
@@ -317,14 +318,26 @@ export default function OdooMigration() {
 
   // ─── Migración ─────────────────────────────────────────────────────────────
 
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll logs
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
+
   const runMigration = async () => {
+    if (running) return;
     setRunning(true);
+    setMigrationError(null);
+    setStats(null);
+    setPerModelStats({});
     setProgressNum(0);
     setProgressLabel("");
-    setStats(null);
-    setPerModelStats(null);
+    setLogs([]);
     setStep(3);
-
+    
     let isFinished = false;
     let continuePolling = false;
     let logOffset = 0;
@@ -344,49 +357,59 @@ export default function OdooMigration() {
             logOffset = data.next_offset;
           }
           
-          for (const line of rawLogs) {
-            const trimmed = line.trim();
-            if (trimmed.includes("__FINAL_RESPONSE__: ")) {
-              try {
-                const finalPayload = JSON.parse(trimmed.split("__FINAL_RESPONSE__: ")[1]);
-                if (!isFinished) {
-                  isFinished = true;
-                  clearInterval(logIntervalId);
-                  if (finalPayload.status === "ok") {
-                    setProgressNum(100);
-                    setProgressLabel("");
-                    setStats(finalPayload.data?.stats ?? null);
-                    setTotal(finalPayload.data?.total ?? 0);
-                    if (finalPayload.data?.per_model) {
-                      setPerModelStats(finalPayload.data.per_model);
+            const displayLogs: string[] = [];
+
+            for (const line of rawLogs) {
+              const trimmed = line.trim();
+              if (trimmed.includes("__FINAL_RESPONSE__: ")) {
+                try {
+                  const finalPayload = JSON.parse(trimmed.split("__FINAL_RESPONSE__: ")[1]);
+                  if (!isFinished) {
+                    isFinished = true;
+                    clearInterval(logIntervalId);
+                    if (finalPayload.status === "ok") {
+                      setProgressNum(100);
+                      setProgressLabel("");
+                      setStats(finalPayload.data?.stats ?? null);
+                      setTotal(finalPayload.data?.total ?? 0);
+                      if (finalPayload.data?.per_model) {
+                        setPerModelStats(finalPayload.data.per_model);
+                      }
+                    } else {
+                      setMigrationError(finalPayload.error || "Error desconocido");
                     }
-                  } else {
-                    setMigrationError(finalPayload.error || "Error desconocido");
+                    setRunning(false);
                   }
-                  setRunning(false);
+                } catch (err) { 
+                  console.error("Error parseando __FINAL_RESPONSE__:", err, "Raw:", trimmed);
+                  if (!isFinished) {
+                    isFinished = true;
+                    clearInterval(logIntervalId);
+                    setMigrationError("Error procesando los resultados finales del servidor.");
+                    setRunning(false);
+                  }
                 }
-              } catch (err) { 
-                console.error("Error parseando __FINAL_RESPONSE__:", err, "Raw:", trimmed);
-                if (!isFinished) {
-                  isFinished = true;
-                  clearInterval(logIntervalId);
-                  setMigrationError("Error procesando los resultados finales del servidor.");
-                  setRunning(false);
-                }
+                continue;
               }
-              continue;
+              if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                try {
+                  const parsed = JSON.parse(trimmed);
+                  if (parsed?.event === "progress" && parsed.total > 0) {
+                    lastDone = parsed.done;
+                    lastTotal = parsed.total;
+                    if (parsed.model) lastModel = parsed.model;
+                  }
+                  if (parsed?.action === "warning" && parsed.message) {
+                    displayLogs.push(`⚠️ AVISO: ${parsed.message}`);
+                  }
+                  continue;
+                } catch { /* ignorar */ }
+              }
+              displayLogs.push(line);
             }
-            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-              try {
-                const parsed = JSON.parse(trimmed);
-                if (parsed?.event === "progress" && parsed.total > 0) {
-                  lastDone = parsed.done;
-                  lastTotal = parsed.total;
-                  if (parsed.model) lastModel = parsed.model;
-                }
-              } catch { /* ignorar */ }
+            if (displayLogs.length > 0) {
+              setLogs(prev => [...prev, ...displayLogs]);
             }
-          }
           if (lastTotal > 0 && !isFinished) {
             setProgressNum(Math.min(Math.round((lastDone / lastTotal) * 100), 99));
             if (lastModel) setProgressLabel(MODEL_LABELS[lastModel] ?? lastModel);
@@ -668,6 +691,18 @@ export default function OdooMigration() {
                 </p>
               </div>
             </div>
+
+            {/* Consola de logs */}
+            {logs.length > 0 && (
+              <div className="bg-black/90 text-green-400 font-mono text-[11px] p-4 rounded-xl h-64 overflow-y-auto space-y-1 border border-border shadow-inner">
+                {logs.map((log, i) => (
+                  <div key={i} className={log.includes("⚠️") || log.toLowerCase().includes("warning") ? "text-yellow-400" : log.toLowerCase().includes("error") ? "text-red-400" : ""}>
+                    {log}
+                  </div>
+                ))}
+                <div ref={logsEndRef} />
+              </div>
+            )}
 
             {/* Contadores */}
             {stats && (
