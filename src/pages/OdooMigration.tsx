@@ -3,6 +3,7 @@ import {
   ArrowRight, CheckCircle2, AlertCircle, Loader2,
   Play, RotateCcw, ChevronRight, Wifi, WifiOff,
   Package, Users, BarChart3, Database, Layers,
+  FileText, ShoppingCart, ShoppingBag, BookOpen
 } from "lucide-react";
 import { callPython } from "../lib/python";
 import { useClients } from "../hooks/useClients";
@@ -69,6 +70,48 @@ const MODELS = [
     icon: Database,
     color: "from-orange-500 to-amber-600",
   },
+  {
+    id: "res.partner.supplier",
+    label: "Proveedores",
+    sublabel: "Contactos tipo proveedor",
+    icon: Users,
+    color: "from-indigo-500 to-blue-600",
+  },
+  {
+    id: "account.move",
+    label: "Facturas de Clientes",
+    sublabel: "Facturas emitidas",
+    icon: FileText,
+    color: "from-blue-500 to-indigo-600",
+  },
+  {
+    id: "account.move.supplier",
+    label: "Facturas de Proveedores",
+    sublabel: "Facturas recibidas",
+    icon: FileText,
+    color: "from-rose-500 to-red-600",
+  },
+  {
+    id: "sale.order",
+    label: "Pedidos de Venta",
+    sublabel: "Pedidos a clientes",
+    icon: ShoppingBag,
+    color: "from-green-500 to-emerald-600",
+  },
+  {
+    id: "purchase.order",
+    label: "Pedidos de Compra",
+    sublabel: "Pedidos a proveedores",
+    icon: ShoppingCart,
+    color: "from-amber-500 to-orange-600",
+  },
+  {
+    id: "account.move.entry",
+    label: "Asientos Contables",
+    sublabel: "Apuntes manuales y diarios",
+    icon: BookOpen,
+    color: "from-slate-500 to-gray-600",
+  },
 ];
 
 const MODEL_LABELS: Record<string, string> = {
@@ -76,6 +119,12 @@ const MODEL_LABELS: Record<string, string> = {
   "res.partner": "Contactos",
   "product.template": "Productos",
   "stock.quant": "Inventario",
+  "res.partner.supplier": "Proveedores",
+  "account.move": "Facturas de Clientes",
+  "account.move.supplier": "Facturas de Proveedores",
+  "sale.order": "Pedidos de Venta",
+  "purchase.order": "Pedidos de Compra",
+  "account.move.entry": "Asientos Contables",
 };
 
 const emptyCredentials = (): OdooCredentials => ({
@@ -242,7 +291,8 @@ export default function OdooMigration() {
 
   // Progreso y resultado
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<ProgressEvent[]>([]);
+  const [progressNum, setProgressNum] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
   const [stats, setStats] = useState<MigrationStats | null>(null);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
@@ -275,11 +325,43 @@ export default function OdooMigration() {
 
   const runMigration = async () => {
     setRunning(true);
-    setProgress([]);
+    setProgressNum(0);
+    setProgressLabel("");
     setStats(null);
     setPerModelStats(null);
     setMigrationError(null);
     setStep(3);
+
+    // Polling de progreso desde /api/logs (igual que en MigrationWizard)
+    const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://127.0.0.1:8000' : '';
+    const logIntervalId = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/logs`);
+        if (res.ok) {
+          const data = await res.json();
+          const rawLogs: string[] = data.logs ?? [];
+          let lastDone = 0, lastTotal = 0, lastModel = "";
+          for (const line of rawLogs) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+              try {
+                const parsed = JSON.parse(trimmed);
+                if (parsed?.event === "progress" && parsed.total > 0) {
+                  lastDone = parsed.done;
+                  lastTotal = parsed.total;
+                  if (parsed.model) lastModel = parsed.model;
+                }
+              } catch { /* ignorar */ }
+            }
+          }
+          if (lastTotal > 0) {
+            setProgressNum(Math.min(Math.round((lastDone / lastTotal) * 100), 99));
+            if (lastModel) setProgressLabel(MODEL_LABELS[lastModel] ?? lastModel);
+          }
+        }
+      } catch { /* ignorar errores de red durante polling */ }
+    }, 1000);
 
     try {
       const res = await callPython("run_odoo_migration", {
@@ -290,7 +372,11 @@ export default function OdooMigration() {
         options: { update_existing: updateExisting },
       });
 
+      clearInterval(logIntervalId);
+
       if (res.status === "ok") {
+        setProgressNum(100);
+        setProgressLabel("");
         setStats(res.data.stats);
         setTotal(res.data.total);
         if (res.data.per_model) {
@@ -302,6 +388,7 @@ export default function OdooMigration() {
     } catch (e: any) {
       setMigrationError(String(e));
     } finally {
+      clearInterval(logIntervalId);
       setRunning(false);
     }
   };
@@ -311,16 +398,7 @@ export default function OdooMigration() {
   const canProceedStep1 = srcTestStatus === "ok" && dstTestStatus === "ok";
   const model = MODELS.find((m) => m.id === selectedModel) ?? MODELS[0];
 
-  const createdCount = progress.filter((p) => p.action === "created").length;
-  const updatedCount = progress.filter((p) => p.action === "updated").length;
-  const errorCount = progress.filter((p) => p.action === "error").length;
-
-  const progressPercent =
-    stats
-      ? 100
-      : total > 0
-      ? Math.round((progress.length / total) * 100)
-      : 0;
+  const progressPercent = stats ? 100 : progressNum;
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -521,7 +599,7 @@ export default function OdooMigration() {
               </div>
               {!running && (
                 <button
-                  onClick={() => { setStep(2); setStats(null); setProgress([]); }}
+                  onClick={() => { setStep(2); setStats(null); setProgressNum(0); }}
                   className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-white border border-border hover:border-muted-foreground/30 bg-secondary/20 px-3 py-1.5 rounded-lg transition"
                 >
                   <RotateCcw className="w-3 h-3" />
@@ -534,23 +612,28 @@ export default function OdooMigration() {
             <div className="space-y-1.5">
               <div className="h-2 bg-secondary rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-primary to-cyan-400 rounded-full transition-all duration-300"
+                  className="h-full bg-gradient-to-r from-primary to-cyan-400 rounded-full transition-all duration-500"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
-              <p className="text-[10px] text-muted-foreground text-right">
-                {stats ? stats.created + stats.updated + stats.skipped : progress.length}
-                {total > 0 && ` / ${total}`} registros procesados
-              </p>
+              <div className="flex items-center justify-between mt-1">
+                {running && progressLabel ? (
+                  <p className="text-[10px] text-primary/80 font-medium">Migrando: {progressLabel}...</p>
+                ) : <span />}
+                <p className="text-[10px] text-muted-foreground">
+                  {stats ? stats.created + stats.updated + stats.skipped : `${progressPercent}%`}
+                  {stats && total > 0 && ` / ${total}`} {stats ? "registros procesados" : "completado"}
+                </p>
+              </div>
             </div>
 
             {/* Contadores */}
-            {(stats || progress.length > 0) && (
+            {stats && (
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: "Creados", value: stats?.created ?? createdCount, color: "text-emerald-400" },
-                  { label: "Actualizados", value: stats?.updated ?? updatedCount, color: "text-blue-400" },
-                  { label: "Errores", value: stats?.error_count ?? errorCount, color: "text-red-400" },
+                  { label: "Creados", value: stats.created, color: "text-emerald-400" },
+                  { label: "Actualizados", value: stats.updated, color: "text-blue-400" },
+                  { label: "Errores", value: stats.error_count, color: "text-red-400" },
                 ].map((c) => (
                   <div key={c.label} className="bg-secondary/30 rounded-xl p-3 text-center border border-border">
                     <p className={`text-xl font-bold ${c.color}`}>{c.value}</p>

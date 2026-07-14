@@ -869,7 +869,7 @@ def handle_db_update_client_last_used(args: dict) -> None:
 
 def _run_single_odoo_model(
     model: str,
-    connector_cls,
+    odoo_src,
     odoo_dst,
     opts: dict,
     filters: list,
@@ -881,7 +881,7 @@ def _run_single_odoo_model(
     """
     from migrator.odoo_source import OdooSourceConnector
 
-    connector = OdooSourceConnector(connector_cls, model, batch_size=int(opts.get("batch_size", 100)))
+    connector = OdooSourceConnector(odoo_src, model, batch_size=int(opts.get("batch_size", 100)))
     total = connector.count(filters)
     mapping = connector.auto_mapping
 
@@ -927,6 +927,49 @@ def _run_single_odoo_model(
         migrator = AccountMigrator(odoo_dst, mapping, AccountOptions(
             update_existing=opts.get("update_existing", True),
             batch_size=int(opts.get("batch_size", 100)),
+        ))
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "res.partner.supplier":
+        from migrator.partners import MigrationOptions as PartnerOptions, PartnerMigrator
+        migrator = PartnerMigrator(odoo_dst, mapping, PartnerOptions(
+            default_country=opts.get("default_country", "ES"),
+            customer_rank=int(opts.get("customer_rank", 0)),
+            supplier_rank=int(opts.get("supplier_rank", 1)),
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "account.move":
+        from migrator.invoices import MigrationOptions as InvoiceOptions
+        from migrator.odoo_invoice_migrator import OdooInvoiceMigrator
+        migrator = OdooInvoiceMigrator(odoo_dst, odoo_src, mapping, InvoiceOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 50)),
+            format_name=opts.get("format_name", True),
+        ), move_type="out_invoice")
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "account.move.supplier":
+        from migrator.invoices import MigrationOptions as InvoiceOptions
+        from migrator.odoo_invoice_migrator import OdooInvoiceMigrator
+        migrator = OdooInvoiceMigrator(odoo_dst, odoo_src, mapping, InvoiceOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 50)),
+            format_name=opts.get("format_name", True),
+        ), move_type="in_invoice")
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "sale.order" or model == "purchase.order":
+        from migrator.odoo_order_migrator import OdooOrderMigrator
+        migrator = OdooOrderMigrator(odoo_dst, odoo_src, mapping, model, options={
+            "update_existing": opts.get("update_existing", True),
+            "batch_size": int(opts.get("batch_size", 50)),
+        })
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "account.move.entry":
+        from migrator.journal import MigrationOptions as JournalOptions
+        from migrator.odoo_journal_migrator import OdooJournalMigrator
+        migrator = OdooJournalMigrator(odoo_dst, odoo_src, mapping, JournalOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 50)),
         ))
         stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
     else:
@@ -982,8 +1025,14 @@ def handle_run_odoo_migration(args: dict) -> None:
         ALL_MODELS_ORDER = [
             "account.account",
             "res.partner",
+            "res.partner.supplier",
             "product.template",
             "stock.quant",
+            "account.move",          # Facturas Clientes
+            "account.move.supplier", # Facturas Proveedores
+            "sale.order",            # Pedidos Venta
+            "purchase.order",        # Pedidos Compra
+            "account.move.entry",    # Asientos
         ]
 
         combined_created = 0
@@ -1028,62 +1077,12 @@ def handle_run_odoo_migration(args: dict) -> None:
         return
 
     # ── Modo modelo único (comportamiento original) ─────────────────────────
-    connector = OdooSourceConnector(odoo_src, model, batch_size=int(opts.get("batch_size", 100)))
-    total = connector.count(filters)
-    mapping = connector.auto_mapping
-
-    log.info("Migración Odoo→Odoo: modelo=%s, total=%s, dry_run=%s", model, total, dry_run)
-
-    if model == "res.partner":
-        from migrator.partners import MigrationOptions as PartnerOptions, PartnerMigrator
-        migrator = PartnerMigrator(odoo_dst, mapping, PartnerOptions(
-            default_country=opts.get("default_country", "ES"),
-            customer_rank=int(opts.get("customer_rank", 1)),
-            supplier_rank=int(opts.get("supplier_rank", 0)),
-            update_existing=opts.get("update_existing", True),
-            batch_size=int(opts.get("batch_size", 100)),
-        ))
-    elif model == "product.template":
-        from migrator.products import MigrationOptions as ProductOptions, ProductMigrator
-        migrator = ProductMigrator(odoo_dst, mapping, ProductOptions(
-            update_existing=opts.get("update_existing", True),
-            batch_size=int(opts.get("batch_size", 100)),
-        ))
-    elif model == "stock.quant":
-        from migrator.inventory import MigrationOptions as InventoryOptions, InventoryMigrator
-        migrator = InventoryMigrator(odoo_dst, mapping, InventoryOptions(
-            update_existing=opts.get("update_existing", True),
-            apply_inventory=opts.get("apply_inventory", True),
-            batch_size=int(opts.get("batch_size", 100)),
-        ))
-    elif model == "account.account":
-        from migrator.accounts import MigrationOptions as AccountOptions, AccountMigrator
-        migrator = AccountMigrator(odoo_dst, mapping, AccountOptions(
-            update_existing=opts.get("update_existing", True),
-            batch_size=int(opts.get("batch_size", 100)),
-        ))
-    else:
-        raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
-
-    if model == "res.partner":
-        companies_filter = filters + [("is_company", "=", True)]
-        contacts_filter = filters + [("is_company", "=", False)]
-        total_companies = connector.count(companies_filter)
-        total_contacts = connector.count(contacts_filter)
-        total = total_companies + total_contacts
-        log.info("Pasada 1/2: %s empresas", total_companies)
-        stats = migrator.run(connector.iter_rows(companies_filter), total=total, dry_run=dry_run)
-        log.info("Pasada 2/2: %s contactos vinculados", total_contacts)
-        stats2 = migrator.run(connector.iter_rows(contacts_filter), total=total_contacts, dry_run=dry_run)
-        stats.created += stats2.created
-        stats.updated += stats2.updated
-        stats.skipped += stats2.skipped
-        stats.errors += stats2.errors
-    else:
-        rows = connector.iter_rows(filters)
-        stats = migrator.run(rows, total=total, dry_run=dry_run)
-
-    respond("ok", data={"stats": stats.as_dict(), "total": total})
+    try:
+        stats, total = _run_single_odoo_model(model, odoo_src, odoo_dst, opts, filters, dry_run)
+        respond("ok", data={"stats": stats.as_dict(), "total": total})
+    except Exception as e:
+        log.exception("Error al migrar modelo %s: %s", model, e)
+        respond("error", error=str(e))
 
 
 if __name__ == "__main__":

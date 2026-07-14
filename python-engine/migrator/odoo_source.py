@@ -112,6 +112,93 @@ MODEL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "user_type_id": "user_type_id"
         },
     },
+    "res.partner.supplier": {
+        "source_model": "res.partner",
+        "fields": [
+            "name", "vat", "ref", "email", "phone", "mobile", "website",
+            "street", "street2", "city", "zip",
+            "country_id", "state_id",
+            "is_company", "customer_rank", "supplier_rank",
+            "comment", "lang", "type", "parent_id",
+        ],
+        "many2one": {
+            "country_id": "_country",
+            "state_id": "_state",
+            "parent_id": "_parent_name",
+        },
+        "auto_mapping": {
+            "name": "name", "vat": "vat", "ref": "ref",
+            "email": "email", "phone": "phone", "mobile": "mobile",
+            "website": "website", "street": "street", "street2": "street2",
+            "city": "city", "zip": "zip",
+            "_country": "_country", "_state": "_state",
+            "is_company": "is_company",
+            "customer_rank": "customer_rank", "supplier_rank": "supplier_rank",
+            "comment": "comment", "lang": "lang",
+            "type": "type", "_parent_name": "parent_id",
+        },
+    },
+    "account.move.supplier": {
+        "source_model": "account.move",
+        "fields": [
+            "name", "move_type", "invoice_date", "invoice_date_due",
+            "partner_id", "ref", "narration", "state",
+            "invoice_line_ids",
+        ],
+        "many2one": {
+            "partner_id": "_partner_name",
+        },
+        "auto_mapping": {
+            "name": "name", "_partner_name": "partner_id",
+            "invoice_date": "invoice_date", "invoice_date_due": "invoice_date_due",
+            "ref": "ref", "narration": "narration",
+        },
+    },
+    "account.move.entry": {
+        "source_model": "account.move",
+        "fields": [
+            "name", "move_type", "date", "journal_id",
+            "partner_id", "ref", "narration", "state",
+            "line_ids",
+        ],
+        "many2one": {
+            "partner_id": "_partner_name",
+            "journal_id": "_journal_name",
+        },
+        "auto_mapping": {
+            "name": "name", "_partner_name": "partner_id",
+            "date": "date", "_journal_name": "journal_id",
+            "ref": "ref", "narration": "narration",
+        },
+    },
+    "sale.order": {
+        "fields": [
+            "name", "date_order", "partner_id", "client_order_ref",
+            "note", "state", "order_line"
+        ],
+        "many2one": {
+            "partner_id": "_partner_name",
+        },
+        "auto_mapping": {
+            "name": "name", "date_order": "date_order",
+            "_partner_name": "partner_id", "client_order_ref": "client_order_ref",
+            "note": "note",
+        },
+    },
+    "purchase.order": {
+        "fields": [
+            "name", "date_order", "partner_id", "partner_ref",
+            "notes", "state", "order_line"
+        ],
+        "many2one": {
+            "partner_id": "_partner_name",
+        },
+        "auto_mapping": {
+            "name": "name", "date_order": "date_order",
+            "_partner_name": "partner_id", "partner_ref": "partner_ref",
+            "notes": "notes",
+        },
+    },
 }
 
 
@@ -126,7 +213,7 @@ class OdooSourceConnector:
 
     def __init__(self, odoo: OdooClient, model: str, batch_size: int = 100) -> None:
         self.odoo = odoo
-        self.model = model
+        self.model_key = model
         self.batch_size = batch_size
         self._defn = MODEL_DEFINITIONS.get(model)
         if not self._defn:
@@ -134,6 +221,7 @@ class OdooSourceConnector:
                 f"Modelo '{model}' no soportado para migración Odoo→Odoo. "
                 f"Modelos disponibles: {list(MODEL_DEFINITIONS)}"
             )
+        self.model = self._defn.get("source_model", model)
 
     def count(self, domain: list | None = None) -> int:
         """Cuenta los registros del origen que cumplen el dominio."""
@@ -170,7 +258,9 @@ class OdooSourceConnector:
         fields = self._get_available_fields(self._defn["fields"])
         many2one_map = self._defn.get("many2one", {})
 
+        total = self.count(domain)
         offset = 0
+        emitted = 0
         while True:
             batch = self.odoo.execute(
                 self.model,
@@ -183,8 +273,16 @@ class OdooSourceConnector:
             if not batch:
                 break
             for rec in batch:
+                emitted += 1
                 yield self._flatten(rec, many2one_map)
             offset += len(batch)
+            # Emitir progreso de lectura del origen para que la UI lo muestre
+            _emit_progress({
+                "done": emitted,
+                "total": total,
+                "action": "reading",
+                "model": self.model,
+            })
             if len(batch) < self.batch_size:
                 break
 
