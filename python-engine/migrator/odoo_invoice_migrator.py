@@ -36,13 +36,20 @@ class OdooInvoiceMigrator(InvoiceMigrator):
             
             # 1. Obtener líneas del origen
             lines_data = []
-            if line_ids:
-                lines_data = self.odoo_src.execute(
-                    "account.move.line",
-                    "read",
-                    line_ids,
-                    ["product_id", "name", "quantity", "price_unit", "discount", "tax_ids", "account_id", "display_type"]
-                )
+            try:
+                if line_ids:
+                    lines_data = self.odoo_src.execute(
+                        "account.move.line",
+                        "read",
+                        line_ids,
+                        ["product_id", "name", "quantity", "price_unit", "discount", "tax_ids", "account_id", "display_type"]
+                    )
+            except Exception as e:
+                log.warning("Factura %s (%s): Error leyendo líneas: %s", idx, name, e)
+                _emit_progress({"action": "error", "done": idx, "total": total, "name": name, "error": f"Error leyendo líneas: {e}"})
+                stats.errors.append({"row": idx, "error": f"Error leyendo líneas: {e}"})
+                stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
+                continue
 
             vals = self.transform_row(header)
             
@@ -81,11 +88,14 @@ class OdooInvoiceMigrator(InvoiceMigrator):
                 tax_ids = []
                 src_tax_ids = line.get("tax_ids", [])
                 if src_tax_ids:
-                    src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
-                    for st in src_taxes:
-                        t_id = self._resolve_tax(st.get("name"), tax_use="sale" if self.move_type == "out_invoice" else "purchase")
-                        if t_id:
-                            tax_ids.append((4, t_id))
+                    try:
+                        src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
+                        for st in src_taxes:
+                            t_id = self._resolve_tax(st.get("name"), tax_use="sale" if self.move_type == "out_invoice" else "purchase")
+                            if t_id:
+                                tax_ids.append((4, t_id))
+                    except Exception as e:
+                        log.warning("Factura %s (%s): Error leyendo impuestos: %s", idx, name, e)
 
                 line_vals = {
                     "name": line.get("name", ""),

@@ -95,11 +95,14 @@ class OdooOrderMigrator:
                 tax_ids = []
                 src_tax_ids = line.get("tax_id", [])
                 if src_tax_ids:
-                    src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
-                    for st in src_taxes:
-                        t_id = self.base_migrator._resolve_tax(st.get("name"), tax_use="sale")
-                        if t_id:
-                            tax_ids.append((4, t_id))
+                    try:
+                        src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
+                        for st in src_taxes:
+                            t_id = self.base_migrator._resolve_tax(st.get("name"), tax_use="sale")
+                            if t_id:
+                                tax_ids.append((4, t_id))
+                    except Exception as e:
+                        log.warning("Pedido Venta %s (%s): Error leyendo impuestos: %s", idx, name, e)
 
                 line_vals = {
                     "name": line.get("name", ""),
@@ -220,11 +223,14 @@ class OdooOrderMigrator:
                 tax_ids = []
                 src_tax_ids = line.get("taxes_id", [])
                 if src_tax_ids:
-                    src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
-                    for st in src_taxes:
-                        t_id = self.base_migrator._resolve_tax(st.get("name"), tax_use="purchase")
-                        if t_id:
-                            tax_ids.append((4, t_id))
+                    try:
+                        src_taxes = self.odoo_src.execute("account.tax", "read", src_tax_ids, ["name"])
+                        for st in src_taxes:
+                            t_id = self.base_migrator._resolve_tax(st.get("name"), tax_use="purchase")
+                            if t_id:
+                                tax_ids.append((4, t_id))
+                    except Exception as e:
+                        log.warning("Pedido Compra %s (%s): Error leyendo impuestos: %s", idx, name, e)
 
                 line_vals = {
                     "name": line.get("name", ""),
