@@ -360,7 +360,15 @@ export default function OdooMigration() {
                   }
                   setRunning(false);
                 }
-              } catch { /* ignorar */ }
+              } catch (err) { 
+                console.error("Error parseando __FINAL_RESPONSE__:", err, "Raw:", trimmed);
+                if (!isFinished) {
+                  isFinished = true;
+                  clearInterval(logIntervalId);
+                  setMigrationError("Error procesando los resultados finales del servidor.");
+                  setRunning(false);
+                }
+              }
               continue;
             }
             if (trimmed.startsWith("{") && trimmed.endsWith("}")) {

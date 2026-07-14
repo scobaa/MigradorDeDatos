@@ -47,13 +47,20 @@ class OdooOrderMigrator:
             line_ids = header.get("order_line", [])
             
             lines_data = []
-            if line_ids:
-                lines_data = self.odoo_src.execute(
-                    "sale.order.line",
-                    "read",
-                    line_ids,
-                    ["product_id", "name", "product_uom_qty", "price_unit", "discount", "tax_id", "display_type"]
-                )
+            try:
+                if line_ids:
+                    lines_data = self.odoo_src.execute(
+                        "sale.order.line",
+                        "read",
+                        line_ids,
+                        ["product_id", "name", "product_uom_qty", "price_unit", "discount", "tax_id", "display_type"]
+                    )
+            except Exception as e:
+                log.warning("Pedido Venta %s (%s): Error leyendo líneas: %s", idx, name, e)
+                _emit_sales_progress({"action": "error", "done": idx, "total": total, "name": name, "error": f"Error leyendo líneas: {e}"})
+                stats.errors.append({"row": idx, "error": f"Error leyendo líneas: {e}"})
+                stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
+                continue
 
             vals = self.base_migrator.transform_row(header)
 
@@ -165,13 +172,20 @@ class OdooOrderMigrator:
             line_ids = header.get("order_line", [])
             
             lines_data = []
-            if line_ids:
-                lines_data = self.odoo_src.execute(
-                    "purchase.order.line",
-                    "read",
-                    line_ids,
-                    ["product_id", "name", "product_qty", "price_unit", "taxes_id", "display_type"]
-                )
+            try:
+                if line_ids:
+                    lines_data = self.odoo_src.execute(
+                        "purchase.order.line",
+                        "read",
+                        line_ids,
+                        ["product_id", "name", "product_qty", "price_unit", "taxes_id", "display_type"]
+                    )
+            except Exception as e:
+                log.warning("Pedido Compra %s (%s): Error leyendo líneas: %s", idx, name, e)
+                _emit_purchase_progress({"status": "error", "done": idx, "total": total, "name": name, "error": f"Error leyendo líneas: {e}"})
+                stats.errors.append({"row": idx, "error": f"Error leyendo líneas: {e}"})
+                stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
+                continue
 
             vals = self.base_migrator.transform_row(header)
 
