@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   ArrowRight, CheckCircle2, AlertCircle, Loader2,
   Play, RotateCcw, ChevronRight, Wifi, WifiOff,
-  Package, Users, BarChart3, Database,
+  Package, Users, BarChart3, Database, Layers,
 } from "lucide-react";
 import { callPython } from "../lib/python";
 import { useClients } from "../hooks/useClients";
@@ -35,6 +35,13 @@ interface MigrationStats {
 
 const MODELS = [
   {
+    id: "all",
+    label: "Migrar Todo",
+    sublabel: "Todos los modelos en orden",
+    icon: Layers,
+    color: "from-pink-500 to-rose-600",
+  },
+  {
     id: "res.partner",
     label: "Contactos",
     sublabel: "Clientes y proveedores",
@@ -63,6 +70,13 @@ const MODELS = [
     color: "from-orange-500 to-amber-600",
   },
 ];
+
+const MODEL_LABELS: Record<string, string> = {
+  "account.account": "Plan Contable",
+  "res.partner": "Contactos",
+  "product.template": "Productos",
+  "stock.quant": "Inventario",
+};
 
 const emptyCredentials = (): OdooCredentials => ({
   url: "", db: "", username: "", password: "",
@@ -232,6 +246,7 @@ export default function OdooMigration() {
   const [stats, setStats] = useState<MigrationStats | null>(null);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
+  const [perModelStats, setPerModelStats] = useState<Record<string, MigrationStats & { total: number; status: string }> | null>(null);
 
 
   // ─── Test de conexión ──────────────────────────────────────────────────────
@@ -262,6 +277,7 @@ export default function OdooMigration() {
     setRunning(true);
     setProgress([]);
     setStats(null);
+    setPerModelStats(null);
     setMigrationError(null);
     setStep(3);
 
@@ -277,6 +293,9 @@ export default function OdooMigration() {
       if (res.status === "ok") {
         setStats(res.data.stats);
         setTotal(res.data.total);
+        if (res.data.per_model) {
+          setPerModelStats(res.data.per_model);
+        }
       } else {
         setMigrationError(res.error || "Error desconocido");
       }
@@ -290,7 +309,7 @@ export default function OdooMigration() {
   // ─── UI Helpers ────────────────────────────────────────────────────────────
 
   const canProceedStep1 = srcTestStatus === "ok" && dstTestStatus === "ok";
-  const model = MODELS.find((m) => m.id === selectedModel)!;
+  const model = MODELS.find((m) => m.id === selectedModel) ?? MODELS[0];
 
   const createdCount = progress.filter((p) => p.action === "created").length;
   const updatedCount = progress.filter((p) => p.action === "updated").length;
@@ -496,7 +515,7 @@ export default function OdooMigration() {
                       : "Error en la migración"}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    {model.label} · {srcCreds.url} → {dstCreds.url}
+                    {selectedModel === "all" ? "Todos los modelos" : model.label} · {srcCreds.url} → {dstCreds.url}
                   </p>
                 </div>
               </div>
@@ -565,6 +584,38 @@ export default function OdooMigration() {
               <p className="text-xs text-red-400 font-semibold flex items-center gap-2">
                 <AlertCircle className="w-4 h-4" /> {migrationError}
               </p>
+            </div>
+          )}
+
+          {/* Tabla de desglose por modelo (modo Migrar Todo) */}
+          {perModelStats && (
+            <div className="bg-secondary/20 border border-border rounded-2xl p-5 space-y-3">
+              <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-primary" />
+                Desglose por modelo
+              </h3>
+              <div className="space-y-2">
+                {Object.entries(perModelStats).map(([modelKey, ms]) => (
+                  <div key={modelKey} className="grid grid-cols-5 gap-2 items-center bg-secondary/30 rounded-xl px-3 py-2 border border-border">
+                    <div className="col-span-2">
+                      <p className="text-xs font-semibold text-white">{MODEL_LABELS[modelKey] ?? modelKey}</p>
+                      <p className="text-[10px] text-muted-foreground">{modelKey}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-emerald-400">{ms.created}</p>
+                      <p className="text-[9px] text-muted-foreground">Creados</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-blue-400">{ms.updated}</p>
+                      <p className="text-[9px] text-muted-foreground">Actualizados</p>
+                    </div>
+                    <div className="text-center">
+                      <p className={`text-sm font-bold ${ms.error_count > 0 ? "text-red-400" : "text-muted-foreground"}`}>{ms.error_count}</p>
+                      <p className="text-[9px] text-muted-foreground">Errores</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

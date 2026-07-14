@@ -867,6 +867,74 @@ def handle_db_update_client_last_used(args: dict) -> None:
         respond("error", error=str(e))
 
 
+def _run_single_odoo_model(
+    model: str,
+    connector_cls,
+    odoo_dst,
+    opts: dict,
+    filters: list,
+    dry_run: bool,
+):
+    """
+    Ejecuta la migración Odoo→Odoo para un único modelo.
+    Devuelve (stats, total).
+    """
+    from migrator.odoo_source import OdooSourceConnector
+
+    connector = OdooSourceConnector(connector_cls, model, batch_size=int(opts.get("batch_size", 100)))
+    total = connector.count(filters)
+    mapping = connector.auto_mapping
+
+    log.info("Migración Odoo→Odoo modelo=%s, total=%s, dry_run=%s", model, total, dry_run)
+
+    if model == "res.partner":
+        from migrator.partners import MigrationOptions as PartnerOptions, PartnerMigrator
+        migrator = PartnerMigrator(odoo_dst, mapping, PartnerOptions(
+            default_country=opts.get("default_country", "ES"),
+            customer_rank=int(opts.get("customer_rank", 1)),
+            supplier_rank=int(opts.get("supplier_rank", 0)),
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+        companies_filter = filters + [("is_company", "=", True)]
+        contacts_filter = filters + [("is_company", "=", False)]
+        total_companies = connector.count(companies_filter)
+        total_contacts = connector.count(contacts_filter)
+        total = total_companies + total_contacts
+        stats = migrator.run(connector.iter_rows(companies_filter), total=total, dry_run=dry_run)
+        stats2 = migrator.run(connector.iter_rows(contacts_filter), total=total_contacts, dry_run=dry_run)
+        stats.created += stats2.created
+        stats.updated += stats2.updated
+        stats.skipped += stats2.skipped
+        stats.errors += stats2.errors
+    elif model == "product.template":
+        from migrator.products import MigrationOptions as ProductOptions, ProductMigrator
+        migrator = ProductMigrator(odoo_dst, mapping, ProductOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "stock.quant":
+        from migrator.inventory import MigrationOptions as InventoryOptions, InventoryMigrator
+        migrator = InventoryMigrator(odoo_dst, mapping, InventoryOptions(
+            update_existing=opts.get("update_existing", True),
+            apply_inventory=opts.get("apply_inventory", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    elif model == "account.account":
+        from migrator.accounts import MigrationOptions as AccountOptions, AccountMigrator
+        migrator = AccountMigrator(odoo_dst, mapping, AccountOptions(
+            update_existing=opts.get("update_existing", True),
+            batch_size=int(opts.get("batch_size", 100)),
+        ))
+        stats = migrator.run(connector.iter_rows(filters), total=total, dry_run=dry_run)
+    else:
+        raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
+
+    return stats, total
+
+
 def handle_run_odoo_migration(args: dict) -> None:
     """
     Ejecuta la migración Odoo → Odoo.
@@ -874,14 +942,14 @@ def handle_run_odoo_migration(args: dict) -> None:
     args: {
         odoo_source: {url, db, username, password},
         odoo_dest: {url, db, username, password},
-        model: str,
-        filters?: list,       # dominio Odoo para filtrar origen
+        model: str,           # o "all" para migrar todos los modelos
+        filters?: list,
         options?: dict,
         dry_run?: bool,
     }
     """
     from migrator.odoo_client import OdooClient, OdooConfig
-    from migrator.odoo_source import OdooSourceConnector, MODEL_DEFINITIONS
+    from migrator.odoo_source import OdooSourceConnector
 
     src_args = args["odoo_source"]
     dst_args = args["odoo_dest"]
@@ -904,14 +972,68 @@ def handle_run_odoo_migration(args: dict) -> None:
     ))
     odoo_dst.connect()
 
-    # 3. Preparar conector de origen
+    # ── Modo "Migrar Todo" ──────────────────────────────────────────────────
+    if model == "all":
+        # Orden lógico de dependencias:
+        # 1. Plan Contable (sin dependencias)
+        # 2. Contactos (referenciados por productos, facturas, etc.)
+        # 3. Productos (dependen de contactos para listas de precio)
+        # 4. Inventario (depende de que existan los productos)
+        ALL_MODELS_ORDER = [
+            "account.account",
+            "res.partner",
+            "product.template",
+            "stock.quant",
+        ]
+
+        combined_created = 0
+        combined_updated = 0
+        combined_skipped = 0
+        combined_errors = []
+        combined_total = 0
+        per_model: dict[str, dict] = {}
+
+        for m in ALL_MODELS_ORDER:
+            log.info("=== Migración Todo: iniciando modelo %s ===", m)
+            try:
+                stats, total_m = _run_single_odoo_model(m, odoo_src, odoo_dst, opts, filters, dry_run)
+                per_model[m] = {
+                    **stats.as_dict(),
+                    "total": total_m,
+                    "status": "ok",
+                }
+                combined_created += stats.created
+                combined_updated += stats.updated
+                combined_skipped += stats.skipped
+                combined_errors += stats.errors
+                combined_total += total_m
+                log.info("=== Modelo %s completado: +%d creados, +%d actualizados ===", m, stats.created, stats.updated)
+            except Exception as e:
+                log.exception("Error al migrar modelo %s: %s", m, e)
+                per_model[m] = {
+                    "created": 0, "updated": 0, "skipped": 0,
+                    "error_count": 1, "errors": [{"row": 0, "error": str(e)}],
+                    "total": 0, "status": "error",
+                }
+                combined_errors.append({"row": 0, "error": f"[{m}] {e}"})
+
+        combined_stats = {
+            "created": combined_created,
+            "updated": combined_updated,
+            "skipped": combined_skipped,
+            "error_count": len(combined_errors),
+            "errors": combined_errors[:100],  # Limitar a 100 para no saturar
+        }
+        respond("ok", data={"stats": combined_stats, "total": combined_total, "per_model": per_model})
+        return
+
+    # ── Modo modelo único (comportamiento original) ─────────────────────────
     connector = OdooSourceConnector(odoo_src, model, batch_size=int(opts.get("batch_size", 100)))
     total = connector.count(filters)
     mapping = connector.auto_mapping
 
     log.info("Migración Odoo→Odoo: modelo=%s, total=%s, dry_run=%s", model, total, dry_run)
 
-    # 4. Instanciar migrador destino según modelo
     if model == "res.partner":
         from migrator.partners import MigrationOptions as PartnerOptions, PartnerMigrator
         migrator = PartnerMigrator(odoo_dst, mapping, PartnerOptions(
@@ -936,35 +1058,23 @@ def handle_run_odoo_migration(args: dict) -> None:
         ))
     elif model == "account.account":
         from migrator.accounts import MigrationOptions as AccountOptions, AccountMigrator
-        account_opts = AccountOptions(
+        migrator = AccountMigrator(odoo_dst, mapping, AccountOptions(
             update_existing=opts.get("update_existing", True),
             batch_size=int(opts.get("batch_size", 100)),
-        )
-        migrator = AccountMigrator(odoo_dst, mapping, account_opts)
+        ))
     else:
         raise ValueError(f"Modelo '{model}' no soportado para migración Odoo→Odoo.")
 
-    # 5. Ejecutar migración
     if model == "res.partner":
-        # Para res.partner hacemos 2 pasadas para garantizar que las empresas
-        # existen en el destino antes de crear los contactos vinculados a ellas.
-        # Pasada 1: solo empresas (is_company = True)
         companies_filter = filters + [("is_company", "=", True)]
         contacts_filter = filters + [("is_company", "=", False)]
-
         total_companies = connector.count(companies_filter)
         total_contacts = connector.count(contacts_filter)
         total = total_companies + total_contacts
-
         log.info("Pasada 1/2: %s empresas", total_companies)
-        rows_companies = connector.iter_rows(companies_filter)
-        stats = migrator.run(rows_companies, total=total, dry_run=dry_run)
-
+        stats = migrator.run(connector.iter_rows(companies_filter), total=total, dry_run=dry_run)
         log.info("Pasada 2/2: %s contactos vinculados", total_contacts)
-        rows_contacts = connector.iter_rows(contacts_filter)
-        stats2 = migrator.run(rows_contacts, total=total_contacts, dry_run=dry_run)
-
-        # Combinar estadísticas de ambas pasadas
+        stats2 = migrator.run(connector.iter_rows(contacts_filter), total=total_contacts, dry_run=dry_run)
         stats.created += stats2.created
         stats.updated += stats2.updated
         stats.skipped += stats2.skipped
