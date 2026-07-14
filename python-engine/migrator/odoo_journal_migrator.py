@@ -6,11 +6,11 @@ import logging
 from typing import Any, Iterable
 
 from migrator.odoo_client import OdooClient
-from migrator.journal import JournalMigrator, MigrationOptions, MigrationStats, _emit_progress
+from migrator.journal import JournalEntryMigrator, MigrationOptions, MigrationStats, _emit_progress
 
 log = logging.getLogger(__name__)
 
-class OdooJournalMigrator(JournalMigrator):
+class OdooJournalMigrator(JournalEntryMigrator):
     """
     Extiende JournalMigrator para migrar asientos contables de Odoo a Odoo.
     A diferencia de Excel, aquí recibimos los asientos desde iter_rows

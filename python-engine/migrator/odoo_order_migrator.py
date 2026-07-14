@@ -6,8 +6,8 @@ import logging
 from typing import Any, Iterable
 
 from migrator.odoo_client import OdooClient
-from migrator.sales import SalesMigrator, MigrationOptions as SalesOptions, MigrationStats as SalesStats, _emit_progress as _emit_sales_progress
-from migrator.purchases import PurchaseMigrator, MigrationOptions as PurchaseOptions, MigrationStats as PurchaseStats, _emit_progress as _emit_purchase_progress
+from migrator.sales import SalesOrderMigrator, MigrationOptions as SalesOptions, MigrationStats as SalesStats, _emit_progress as _emit_sales_progress
+from migrator.purchases import PurchaseOrderMigrator, MigrationOptions as PurchaseOptions, MigrationStats as PurchaseStats, _emit_progress as _emit_purchase_progress
 
 log = logging.getLogger(__name__)
 
@@ -30,9 +30,9 @@ class OdooOrderMigrator:
         self.options = options or {}
         
         if self.model == "sale.order":
-            self.base_migrator = SalesMigrator(odoo, mapping, SalesOptions(**{k:v for k,v in self.options.items() if hasattr(SalesOptions, k)}))
+            self.base_migrator = SalesOrderMigrator(odoo, mapping, SalesOptions(**{k:v for k,v in self.options.items() if hasattr(SalesOptions, k)}))
         else:
-            self.base_migrator = PurchaseMigrator(odoo, mapping, PurchaseOptions(**{k:v for k,v in self.options.items() if hasattr(PurchaseOptions, k)}))
+            self.base_migrator = PurchaseOrderMigrator(odoo, mapping, PurchaseOptions(**{k:v for k,v in self.options.items() if hasattr(PurchaseOptions, k)}))
 
     def run(self, rows: Iterable[dict[str, Any]], total: int = 0, dry_run: bool = False) -> Any:
         if self.model == "sale.order":
