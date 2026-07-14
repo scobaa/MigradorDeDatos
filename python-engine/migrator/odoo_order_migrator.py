@@ -62,8 +62,12 @@ class OdooOrderMigrator:
                 stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
                 continue
 
-            partner_val = header.get("partner_id")
-            partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
+            partner_name_raw = header.get("_partner_name")
+            if partner_name_raw:
+                partner_name = str(partner_name_raw)
+            else:
+                partner_val = header.get("partner_id")
+                partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
             partner_id = self.base_migrator._resolve_partner(partner_name)
             if not partner_id:
                 log.warning("Pedido Venta %s (%s): Partner '%s' no encontrado. Ignorado.", idx, name, partner_name)
@@ -189,8 +193,12 @@ class OdooOrderMigrator:
                 stats.error_count = getattr(stats, "error_count", 0) + 1 if hasattr(stats, "error_count") else len(stats.errors)
                 continue
 
-            partner_val = header.get("partner_id")
-            partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
+            partner_name_raw = header.get("_partner_name")
+            if partner_name_raw:
+                partner_name = str(partner_name_raw)
+            else:
+                partner_val = header.get("partner_id")
+                partner_name = partner_val[1] if isinstance(partner_val, (list, tuple)) and len(partner_val) > 1 else str(partner_val or "")
             partner_id = self.base_migrator._resolve_partner(partner_name)
             if not partner_id:
                 log.warning("Pedido Compra %s (%s): Partner '%s' no encontrado. Ignorado.", idx, name, partner_name)
