@@ -627,11 +627,11 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                           error_count: finalPayload.data?.stats?.error_count || 0,
                           errors: finalPayload.data?.stats?.errors || [],
                         });
-                        setMigrationError(null);
+                        // No action needed on null error
                       } else {
-                        setMigrationError(finalPayload.error || "Error desconocido");
+                        alert("Error: " + (finalPayload.error || "Error desconocido"));
                       }
-                      setMigrating(false);
+                      setIsMigrating(false);
                     }
                   } catch { /* ignorar */ }
                   continue;
@@ -733,7 +733,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           error_count: response.data.stats?.error_count || 0,
           errors: response.data.stats?.errors || [],
         });
-        setMigrationError(null);
+        // Error cleared
         setIsMigrating(false);
         setTimeout(() => setStep(6), 800);
       } else if (response.status === "error" && response.error?.includes("motor Python no está disponible")) {
@@ -741,12 +741,24 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         continuePolling = true;
         setLogs(prev => [...prev, "⚠️ La conexión web principal excedió el tiempo límite (timeout), pero la migración continúa en el servidor. Seguimos recibiendo los logs en directo..."]);
         return;
+      } else {
+        if (logIntervalId) clearInterval(logIntervalId);
+        if (unlisten) unlisten();
+        alert("Error: " + (response.error || "Error desconocido"));
+        setIsMigrating(false);
+        setProgress(0);
       }
+    } catch (e: any) {
+      if (isFinished) return;
       if (logIntervalId) clearInterval(logIntervalId);
       if (unlisten) unlisten();
-      alert("Error de red o comunicación: " + e.toString());
+      alert("Error: " + (e.message || String(e)));
       setIsMigrating(false);
       setProgress(0);
+    } finally {
+      if (!isFinished && !continuePolling) {
+        setIsMigrating(false);
+      }
     }
   };
 
