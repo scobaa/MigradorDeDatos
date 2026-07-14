@@ -1054,9 +1054,15 @@ def handle_run_odoo_migration(args: dict) -> None:
             try:
                 stats, total_m = _run_single_odoo_model(m, odoo_src, odoo_dst, opts, filters, dry_run)
                 per_model[m] = {
-                    **stats.as_dict(),
                     "total": total_m,
                     "status": "ok",
+                    "stats": {
+                        "created": stats.created,
+                        "updated": stats.updated,
+                        "skipped": stats.skipped,
+                        "error_count": len(stats.errors),
+                        "errors": stats.errors[:100],
+                    }
                 }
                 combined_created += stats.created
                 combined_updated += stats.updated

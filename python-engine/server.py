@@ -33,9 +33,19 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self.path == "/api/logs":
+        if self.path.startswith("/api/logs"):
             global LOG_QUEUE
-            data_bytes = json.dumps({"logs": LOG_QUEUE}).encode("utf-8")
+            import urllib.parse
+            parsed_url = urllib.parse.urlparse(self.path)
+            query = urllib.parse.parse_qs(parsed_url.query)
+            offset = 0
+            if "offset" in query:
+                try:
+                    offset = int(query["offset"][0])
+                except:
+                    pass
+            logs_to_send = LOG_QUEUE[offset:]
+            data_bytes = json.dumps({"logs": logs_to_send, "next_offset": offset + len(logs_to_send)}).encode("utf-8")
             self._send_response_json(200, data_bytes)
             return
         self.send_response(404)
