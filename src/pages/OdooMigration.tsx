@@ -18,13 +18,7 @@ interface OdooCredentials {
   password: string;
 }
 
-interface ProgressEvent {
-  done: number;
-  total: number;
-  action: "created" | "updated" | "skipped" | "error";
-  name?: string;
-  message?: string;
-}
+
 
 interface MigrationStats {
   created: number;
