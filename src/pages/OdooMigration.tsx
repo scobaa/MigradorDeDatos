@@ -337,125 +337,103 @@ export default function OdooMigration() {
     setProgressLabel("");
     setLogs([]);
     setStep(3);
-    
-    let isFinished = false;
-    let continuePolling = false;
-    let logOffset = 0;
-    let lastDone = 0, lastTotal = 0, lastModel = "";
 
-    // Polling de progreso desde /api/logs (igual que en MigrationWizard)
-    const apiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-      ? 'http://127.0.0.1:8000' : '';
-    const logIntervalId = setInterval(async () => {
-      if (isFinished) return;
-      try {
-        const res = await fetch(`${apiBase}/api/logs?offset=${logOffset}`);
-        if (res.ok) {
-          const data = await res.json();
-          const rawLogs: string[] = data.logs ?? [];
-          if (data.next_offset !== undefined) {
-            logOffset = data.next_offset;
-          }
-          
-            const displayLogs: string[] = [];
+    const apiBase = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ? "http://127.0.0.1:8000" : "";
 
-            for (const line of rawLogs) {
-              const trimmed = line.trim();
-              if (trimmed.includes("__FINAL_RESPONSE__: ")) {
-                try {
-                  const finalPayload = JSON.parse(trimmed.split("__FINAL_RESPONSE__: ")[1]);
-                  if (!isFinished) {
-                    isFinished = true;
-                    clearInterval(logIntervalId);
-                    if (finalPayload.status === "ok") {
-                      setProgressNum(100);
-                      setProgressLabel("");
-                      setStats(finalPayload.data?.stats ?? null);
-                      setTotal(finalPayload.data?.total ?? 0);
-                      if (finalPayload.data?.per_model) {
-                        setPerModelStats(finalPayload.data.per_model);
-                      }
-                    } else {
-                      setMigrationError(finalPayload.error || "Error desconocido");
-                    }
-                    setRunning(false);
-                  }
-                } catch (err) { 
-                  console.error("Error parseando __FINAL_RESPONSE__:", err, "Raw:", trimmed);
-                  if (!isFinished) {
-                    isFinished = true;
-                    clearInterval(logIntervalId);
-                    setMigrationError("Error procesando los resultados finales del servidor.");
-                    setRunning(false);
-                  }
-                }
-                continue;
-              }
-              if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-                try {
-                  const parsed = JSON.parse(trimmed);
-                  if (parsed?.event === "progress" && parsed.total > 0) {
-                    lastDone = parsed.done;
-                    lastTotal = parsed.total;
-                    if (parsed.model) lastModel = parsed.model;
-                  }
-                  if (parsed?.action === "warning" && parsed.message) {
-                    displayLogs.push(`⚠️ AVISO: ${parsed.message}`);
-                  }
-                  continue;
-                } catch { /* ignorar */ }
-              }
-              displayLogs.push(line);
-            }
-            if (displayLogs.length > 0) {
-              setLogs(prev => [...prev, ...displayLogs]);
-            }
-          if (lastTotal > 0 && !isFinished) {
-            setProgressNum(Math.min(Math.round((lastDone / lastTotal) * 100), 99));
-            if (lastModel) setProgressLabel(MODEL_LABELS[lastModel] ?? lastModel);
-          }
-        }
-      } catch { /* ignorar errores de red durante polling */ }
-    }, 1000);
-
+    // ── 1. Lanzar la migración en segundo plano ────────────────────────────
+    let jobId: string;
     try {
-      const res = await callPython("run_odoo_migration", {
-        odoo_source: srcCreds,
-        odoo_dest: dstCreds,
-        model: selectedModel,
-        dry_run: dryRun,
-        options: { update_existing: updateExisting },
+      const startRes = await fetch(`${apiBase}/api/start_job`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: "run_odoo_migration",
+          session_token: (await import("../lib/auth")).getSessionToken() ?? undefined,
+          args: {
+            odoo_source: srcCreds,
+            odoo_dest: dstCreds,
+            model: selectedModel,
+            dry_run: dryRun,
+            options: { update_existing: updateExisting },
+          },
+        }),
       });
-
-      if (isFinished) return;
-
-      clearInterval(logIntervalId);
-
-      if (res.status === "ok") {
-        setProgressNum(100);
-        setProgressLabel("");
-        setStats(res.data.stats);
-        setTotal(res.data.total);
-        if (res.data.per_model) {
-          setPerModelStats(res.data.per_model);
-        }
-      } else if (res.status === "error" && res.error?.includes("motor Python no está disponible")) {
-        // Es muy probable que el proxy (Nginx) haya cortado la conexión por timeout (60s)
-        // ya que "Migrar Todo" tarda varios minutos. No detenemos el polling.
-        continuePolling = true;
-        return;
-      } else {
-        setMigrationError(res.error || "Error desconocido");
-      }
-    } catch (e: any) {
-      if (isFinished) return;
-      setMigrationError(String(e));
-    } finally {
-      if (!isFinished && !continuePolling) {
-        clearInterval(logIntervalId);
+      const startData = await startRes.json();
+      if (!startRes.ok || startData.status !== "ok" || !startData.job_id) {
+        setMigrationError(startData.error || "No se pudo lanzar la migración en segundo plano.");
         setRunning(false);
+        return;
       }
+      jobId = startData.job_id;
+    } catch (e: any) {
+      setMigrationError(`Error de conexión al arrancar la migración: ${e.message}`);
+      setRunning(false);
+      return;
     }
+
+    // ── 2. Polling del estado del job ──────────────────────────────────────
+    let logOffset = 0;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/job/${jobId}?log_offset=${logOffset}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Actualizar offset de logs
+        if (data.next_log_offset !== undefined) logOffset = data.next_log_offset;
+
+        // Procesar logs nuevos
+        const displayLogs: string[] = [];
+        for (const line of (data.logs ?? []) as string[]) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed?.action === "warning" && parsed.message) {
+                displayLogs.push(`⚠️ AVISO: ${parsed.message}`);
+              }
+              // Los eventos de progreso los maneja el campo `progress` del job
+              continue;
+            } catch { /* no es JSON, mostrar como texto */ }
+          }
+          // Filtrar el token __FINAL_RESPONSE__ de los logs visibles
+          if (trimmed.includes("__FINAL_RESPONSE__:")) continue;
+          displayLogs.push(line);
+        }
+        if (displayLogs.length > 0) setLogs(prev => [...prev, ...displayLogs]);
+
+        // Actualizar barra de progreso desde el campo progress del job
+        const prog = data.progress ?? {};
+        if (prog.total > 0 && data.status === "running") {
+          setProgressNum(Math.min(Math.round((prog.done / prog.total) * 100), 99));
+          if (prog.model) setProgressLabel(MODEL_LABELS[prog.model] ?? prog.model);
+        }
+
+        // ── Trabajo terminado ──────────────────────────────────────────────
+        if (data.status === "done") {
+          clearInterval(intervalId);
+          setProgressNum(100);
+          setProgressLabel("");
+          const result = data.result ?? {};
+          setStats(result.stats ?? null);
+          setTotal(result.total ?? 0);
+          if (result.per_model) setPerModelStats(result.per_model);
+          setRunning(false);
+          return;
+        }
+
+        if (data.status === "error") {
+          clearInterval(intervalId);
+          setMigrationError(data.error || "El proceso finalizó con error.");
+          setRunning(false);
+          return;
+        }
+
+      } catch { /* ignorar errores de red transitorios */ }
+    }, 1000);
   };
 
   // ─── UI Helpers ────────────────────────────────────────────────────────────

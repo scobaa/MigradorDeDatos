@@ -144,6 +144,25 @@ def get_user_id(token: str) -> int:
     finally:
         conn.close()
 
+
+def get_user_email(token: str) -> str | None:
+    """Devuelve el email del usuario asociado al token, o None si no existe."""
+    if not token:
+        return None
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT u.email FROM users u INNER JOIN sessions s ON s.user_id = u.id WHERE s.token = ?",
+            (token,),
+        )
+        row = cur.fetchone()
+        return row["email"] if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
 # --- CLIENTES FUNCIONES ---
 
 def get_clients(token: str) -> list[dict]:
