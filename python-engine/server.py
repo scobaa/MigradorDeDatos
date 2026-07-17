@@ -129,29 +129,31 @@ def _run_job_in_background(job: Job, payload: dict, engine_dir: str, python_exe:
                 result = json.loads(stdout_data)
                 if result.get("status") == "ok":
                     job.finish_ok(result.get("data", {}))
-                    _send_summary_email(
-                        to_email=to_email,
-                        status="done",
-                        payload=payload,
-                        result=result.get("data", {}),
-                        log_file_path=log_file_path,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        duration_seconds=duration_seconds,
-                    )
+                    if cmd_name in ("run_migration", "run_odoo_migration"):
+                        _send_summary_email(
+                            to_email=to_email,
+                            status="done",
+                            payload=payload,
+                            result=result.get("data", {}),
+                            log_file_path=log_file_path,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            duration_seconds=duration_seconds,
+                        )
                 else:
                     job.finish_error(result.get("error", "Error desconocido del proceso"))
-                    _send_summary_email(
-                        to_email=to_email,
-                        status="error",
-                        payload=payload,
-                        result={},
-                        log_file_path=log_file_path,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        duration_seconds=duration_seconds,
-                        error=result.get("error", "Error desconocido"),
-                    )
+                    if cmd_name in ("run_migration", "run_odoo_migration"):
+                        _send_summary_email(
+                            to_email=to_email,
+                            status="error",
+                            payload=payload,
+                            result={},
+                            log_file_path=log_file_path,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            duration_seconds=duration_seconds,
+                            error=result.get("error", "Error desconocido"),
+                        )
             except json.JSONDecodeError:
                 job.finish_error(f"Respuesta inválida del proceso: {stdout_data[:200]}")
         else:
@@ -441,28 +443,30 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
                     try:
                         result_dict = json.loads(stdout_data)
                         if result_dict.get("status") == "ok":
-                            _send_summary_email(
-                                to_email=to_email,
-                                status="done",
-                                payload=payload,
-                                result=result_dict.get("data", {}),
-                                log_file_path=log_file_path,
-                                started_at=started_at,
-                                finished_at=finished_at,
-                                duration_seconds=duration_seconds,
-                            )
+                            if cmd_name in ("run_migration", "run_odoo_migration"):
+                                _send_summary_email(
+                                    to_email=to_email,
+                                    status="done",
+                                    payload=payload,
+                                    result=result_dict.get("data", {}),
+                                    log_file_path=log_file_path,
+                                    started_at=started_at,
+                                    finished_at=finished_at,
+                                    duration_seconds=duration_seconds,
+                                )
                         else:
-                            _send_summary_email(
-                                to_email=to_email,
-                                status="error",
-                                payload=payload,
-                                result={},
-                                log_file_path=log_file_path,
-                                started_at=started_at,
-                                finished_at=finished_at,
-                                duration_seconds=duration_seconds,
-                                error=result_dict.get("error", "Error desconocido"),
-                            )
+                            if cmd_name in ("run_migration", "run_odoo_migration"):
+                                _send_summary_email(
+                                    to_email=to_email,
+                                    status="error",
+                                    payload=payload,
+                                    result={},
+                                    log_file_path=log_file_path,
+                                    started_at=started_at,
+                                    finished_at=finished_at,
+                                    duration_seconds=duration_seconds,
+                                    error=result_dict.get("error", "Error desconocido"),
+                                )
                         self._send_json(200, result_dict)
                     except json.JSONDecodeError:
                         self._send_json(200, {"status": "error", "error": "Respuesta JSON inválida"})
