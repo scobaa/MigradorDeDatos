@@ -369,6 +369,18 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
             try:
                 payload = json.loads(post_data.decode("utf-8"))
 
+                # Resolver el email del usuario a partir del token de sesión (opcional)
+                to_email: str | None = None
+                session_token = payload.get("session_token")
+                if session_token:
+                    try:
+                        import db_manager
+                        to_email = db_manager.get_user_email(session_token)
+                    except Exception:
+                        pass
+
+                started_at = datetime.now()
+
                 engine_dir = os.path.dirname(os.path.abspath(__file__))
                 try:
                     cmd_name = payload.get("command", "unknown")
@@ -421,8 +433,41 @@ class PythonBridgeHandler(BaseHTTPRequestHandler):
                 stdout_data = process.stdout.read()
                 process.wait()
                 stderr_thread.join(timeout=1.0)
+                
+                finished_at = datetime.now()
+                duration_seconds = (finished_at - started_at).total_seconds()
 
-                self._send_json(200, json.loads(stdout_data) if stdout_data.strip() else {"status": "error", "error": "Sin respuesta"})
+                if stdout_data.strip():
+                    try:
+                        result_dict = json.loads(stdout_data)
+                        if result_dict.get("status") == "ok":
+                            _send_summary_email(
+                                to_email=to_email,
+                                status="done",
+                                payload=payload,
+                                result=result_dict.get("data", {}),
+                                log_file_path=log_file_path,
+                                started_at=started_at,
+                                finished_at=finished_at,
+                                duration_seconds=duration_seconds,
+                            )
+                        else:
+                            _send_summary_email(
+                                to_email=to_email,
+                                status="error",
+                                payload=payload,
+                                result={},
+                                log_file_path=log_file_path,
+                                started_at=started_at,
+                                finished_at=finished_at,
+                                duration_seconds=duration_seconds,
+                                error=result_dict.get("error", "Error desconocido"),
+                            )
+                        self._send_json(200, result_dict)
+                    except json.JSONDecodeError:
+                        self._send_json(200, {"status": "error", "error": "Respuesta JSON inválida"})
+                else:
+                    self._send_json(200, {"status": "error", "error": "Sin respuesta"})
 
             except Exception as e:
                 self._send_json(500, {"status": "error", "error": f"Error en el servidor bridge: {str(e)}"})

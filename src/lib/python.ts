@@ -44,7 +44,11 @@ export async function callPython<T = any>(
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ command, args }),
+        body: JSON.stringify({
+          command,
+          args,
+          session_token: (await import("./auth")).getSessionToken() ?? undefined
+        }),
       });
       if (response.ok) {
         return await response.json();
