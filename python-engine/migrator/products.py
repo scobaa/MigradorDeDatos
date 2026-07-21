@@ -241,18 +241,34 @@ class ProductMigrator:
 
     def _resolve_fields_in_place(self, vals: dict[str, Any]) -> None:
         """Resuelve los campos de relación Many2one y Many2many in-place."""
-        # Categoría
+        # Categoría: soporta mapeo via "_category" (recomendado) o directamente "categ_id" como string
         category_name = vals.pop("_category", None)
+        if not category_name:
+            # El usuario puede haber mapeado la columna directamente a "categ_id"
+            raw_categ = vals.get("categ_id")
+            if isinstance(raw_categ, str):
+                category_name = raw_categ
+                vals.pop("categ_id", None)
         vals["categ_id"] = self._resolve_category(category_name)
 
-        # Unidades de medida
+        # Unidades de medida: soporta "_uom" o "uom_id" directamente como string
         uom_name = vals.pop("_uom", None)
+        if not uom_name:
+            raw_uom = vals.get("uom_id")
+            if isinstance(raw_uom, str):
+                uom_name = raw_uom
+                vals.pop("uom_id", None)
         if uom_name:
             uom_id = self._resolve_uom(uom_name)
             vals["uom_id"] = uom_id
             vals["uom_po_id"] = uom_id
 
         uom_po_name = vals.pop("_uom_po", None)
+        if not uom_po_name:
+            raw_uom_po = vals.get("uom_po_id")
+            if isinstance(raw_uom_po, str):
+                uom_po_name = raw_uom_po
+                vals.pop("uom_po_id", None)
         if uom_po_name:
             vals["uom_po_id"] = self._resolve_uom(uom_po_name)
 
