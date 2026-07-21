@@ -110,7 +110,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           initialMappings[col] = "standard_price";
         } else if (lowerCol === "pvpart" || lowerCol.includes("venta") || lowerCol.includes("pvp") || lowerCol === "price" || lowerCol === "list_price") {
           initialMappings[col] = "list_price";
-        } else if (lowerCol === "famart" || lowerCol.includes("familia") || lowerCol.includes("categor") || lowerCol === "category") {
+        } else if (lowerCol === "famart" || lowerCol === "category") {
           initialMappings[col] = "_category";
         } else {
           initialMappings[col] = "";
@@ -303,7 +303,7 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
         { name: "barcode", label: "Código de Barras (barcode)", required: false },
         { name: "list_price", label: "Precio de Venta (list_price)", required: false },
         { name: "standard_price", label: "Coste (standard_price)", required: false },
-        { name: "_category", label: "Categoría (categ_id)", required: false },
+        { name: "_category", label: "Categoría de Producto (por Nombre)", required: false },
       ]);
     } else if (selectedModel === "sale.order") {
       setOdooFields([
