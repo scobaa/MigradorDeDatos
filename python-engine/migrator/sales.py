@@ -79,105 +79,62 @@ class SalesOrderMigrator:
         self._tax_cache: dict[tuple[str, str], int | None] = {}
 
     def _resolve_partner(self, partner_code: str | None) -> int | None:
-        """Busca el ID del partner en Odoo usando ID externo, ref o nombre."""
-        if not partner_code:
-            return None
-
-        key = str(partner_code).strip()
-        if key in self._partner_cache:
-            return self._partner_cache[key]
-
-        try:
-            # 1. Buscar por XML ID (los pedidos siempre vinculan res.partner clientes)
-            xml_id = key if key.startswith("cli_") else f"cli_{key}"
-            partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
-            if partner_id:
-                self._partner_cache[key] = partner_id
-                return partner_id
-
-            # 2. Buscar por ref
-            ids = self.odoo.search("res.partner", [("ref", "=", key)])
-            if ids:
-                self._partner_cache[key] = ids[0]
-                return ids[0]
-
-            # 3. Buscar por name
-            ids = self.odoo.search("res.partner", [("name", "=", key)])
-            if ids:
-                self._partner_cache[key] = ids[0]
-                return ids[0]
-        except Exception as e:
-            log.warning("Error al resolver partner '%s': %s", key, e)
-
-        self._partner_cache[key] = None
-        return None
+        """Busca el ID del partner en Odoo: ID externo → ref → nombre."""
+        return self.odoo.resolve_many2one(
+            partner_code,
+            "res.partner",
+            xml_id_prefix="cli_",
+            extra_fields=["ref"],
+            cache=self._partner_cache,
+        )
 
     def _resolve_product(self, product_code: str | None, product_name: str | None = None) -> int | None:
-        """Busca el ID del producto (variante) en Odoo."""
+        """Busca el ID del producto (variante) en Odoo: ID externo → default_code → barcode → nombre."""
         if not product_code and not product_name:
             return None
 
-        key = str(product_code).strip() if product_code else ""
-        if key in self._product_cache:
-            return self._product_cache[key]
+        # Si hay código, usamos resolve_many2one (ID externo → default_code → barcode → name)
+        if product_code:
+            result = self.odoo.resolve_many2one(
+                product_code,
+                "product.product",
+                xml_id_prefix="art_",
+                extra_fields=["default_code", "barcode"],
+                cache=self._product_cache,
+            )
+            if result:
+                return result
 
-        try:
-            # 1. Buscar por default_code (SKU)
-            if key:
-                ids = self.odoo.search("product.product", [("default_code", "=", key)])
-                if ids:
-                    self._product_cache[key] = ids[0]
-                    return ids[0]
-
-            # 2. Buscar por XML ID de product.template
-            if key:
-                xml_id = key if key.startswith("art_") else f"art_{key}"
-                tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
-                if tmpl_id:
-                    p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
-                    if p_ids:
-                        self._product_cache[key] = p_ids[0]
-                        return p_ids[0]
-
-            # 3. Buscar por código de barras
-            if key:
-                ids = self.odoo.search("product.product", [("barcode", "=", key)])
-                if ids:
-                    self._product_cache[key] = ids[0]
-                    return ids[0]
-
-            # 4. Buscar por nombre del producto (ORDER_IDS/NAME)
-            if product_name:
-                # Normalizar: quitar espacios al inicio/final y colapsar múltiples espacios internos
-                name_clean = " ".join(str(product_name).split())
-
-                # 4a. Coincidencia exacta en product.product
+        # Fallback por nombre (ilike en product.product y product.template)
+        if product_name:
+            name_clean = " ".join(str(product_name).split())
+            cache_key = f"__name__{name_clean}"
+            if cache_key in self._product_cache:
+                return self._product_cache[cache_key]
+            try:
+                # Exacto en product.product
                 ids = self.odoo.search("product.product", [("name", "=", name_clean)], limit=1)
                 if ids:
-                    log.info("Producto resuelto por nombre exacto: '%s'", name_clean)
-                    self._product_cache[key] = ids[0]
+                    self._product_cache[cache_key] = ids[0]
                     return ids[0]
 
-                # 4b. Coincidencia case-insensitive (ilike) en product.product
+                # ilike en product.product
                 ids = self.odoo.search("product.product", [("name", "ilike", name_clean)], limit=1)
                 if ids:
-                    log.info("Producto resuelto por nombre ilike: '%s'", name_clean)
-                    self._product_cache[key] = ids[0]
+                    self._product_cache[cache_key] = ids[0]
                     return ids[0]
 
-                # 4c. ilike en product.template (para productos sin variantes propias)
+                # ilike en product.template
                 tmpl_ids = self.odoo.search("product.template", [("name", "ilike", name_clean)], limit=1)
                 if tmpl_ids:
                     p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                     if p_ids:
-                        log.info("Producto resuelto por nombre ilike en product.template: '%s'", name_clean)
-                        self._product_cache[key] = p_ids[0]
+                        self._product_cache[cache_key] = p_ids[0]
                         return p_ids[0]
+            except Exception as e:
+                log.warning("Error al resolver producto por nombre '%s': %s", name_clean, e)
+            self._product_cache[cache_key] = None
 
-        except Exception as e:
-            log.warning("Error al resolver producto '%s' / '%s': %s", key, product_name, e)
-
-        self._product_cache[key] = None
         return None
 
     def _resolve_tax(self, tax_value: str | None) -> int | None:

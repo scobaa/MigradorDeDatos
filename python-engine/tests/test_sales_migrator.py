@@ -1,5 +1,6 @@
 """
 Tests del migrador de sale.order (Pedidos).
+Actualizados para usar el nuevo método resolve_many2one centralizado.
 """
 
 from __future__ import annotations
@@ -16,24 +17,24 @@ def test_resolve_partner():
         mapping={"CODPED": "name"}
     )
 
-    # 1. Resolver por XML ID
-    mock_odoo.get_xml_id_res_id.return_value = 101
+    # 1. Resolver por ID externo (via resolve_many2one)
+    mock_odoo.resolve_many2one.return_value = 101
     assert migrator._resolve_partner("C001") == 101
-    mock_odoo.get_xml_id_res_id.assert_called_with("cli_C001", "res.partner")
+    mock_odoo.resolve_many2one.assert_called_with(
+        "C001", "res.partner",
+        xml_id_prefix="cli_",
+        extra_fields=["ref"],
+        cache=migrator._partner_cache,
+    )
 
     migrator._partner_cache.clear()
 
-    # 2. Resolver por ref
-    mock_odoo.get_xml_id_res_id.return_value = None
-    mock_odoo.search.side_effect = lambda model, domain: [102] if domain == [("ref", "=", "C001")] else []
-    assert migrator._resolve_partner("C001") == 102
+    # 2. Sin resultado → None
+    mock_odoo.resolve_many2one.return_value = None
+    assert migrator._resolve_partner("C001") is None
 
-    migrator._partner_cache.clear()
-
-    # 3. Resolver por name
-    mock_odoo.get_xml_id_res_id.return_value = None
-    mock_odoo.search.side_effect = lambda model, domain: [103] if domain == [("name", "=", "C001")] else []
-    assert migrator._resolve_partner("C001") == 103
+    # 3. Valor vacío → None
+    assert migrator._resolve_partner(None) is None
 
 
 def test_resolve_product():
@@ -43,33 +44,19 @@ def test_resolve_product():
         mapping={"CODPED": "name"}
     )
 
-    # 1. Resolver por SKU (default_code)
-    mock_odoo.search.side_effect = lambda model, domain: [201] if "default_code" in str(domain) else []
+    # 1. Resolver por código (via resolve_many2one)
+    mock_odoo.resolve_many2one.return_value = 201
     assert migrator._resolve_product("PROD01") == 201
 
     migrator._product_cache.clear()
 
-    # 2. Resolver por XML ID de product.template
-    def mock_get_xml_id(xml_id, model):
-        if xml_id == "art_PROD01" and model == "product.template":
-            return 301
-        return None
-    
-    def mock_search_product(model, domain):
-        if "product_tmpl_id" in str(domain):
-            return [202]
-        return []
+    # 2. Resolver por nombre (fallback ilike, sin código)
+    mock_odoo.resolve_many2one.return_value = None
+    mock_odoo.search.side_effect = lambda model, domain, **kw: [202] if "ilike" in str(domain) else []
+    assert migrator._resolve_product(None, product_name="Tornillo M5") == 202
 
-    mock_odoo.get_xml_id_res_id.side_effect = mock_get_xml_id
-    mock_odoo.search.side_effect = mock_search_product
-    assert migrator._resolve_product("PROD01") == 202
-
-    migrator._product_cache.clear()
-
-    # 3. Resolver por barcode
-    mock_odoo.get_xml_id_res_id.side_effect = lambda xml_id, model: None
-    mock_odoo.search.side_effect = lambda model, domain: [203] if "barcode" in str(domain) else []
-    assert migrator._resolve_product("PROD01") == 203
+    # 3. Sin código ni nombre → None
+    assert migrator._resolve_product(None) is None
 
 
 def test_resolve_tax():
@@ -105,12 +92,13 @@ def test_resolve_tax():
 
 def test_migrator_run_dry_run():
     mock_odoo = MagicMock()
-    # Mock partner resolution
-    def mock_get_xml_id(xml_id, model):
+    # resolve_many2one devuelve partner 101; None para pedidos existentes
+    def mock_resolve(value, model, **kwargs):
         if model == "res.partner":
             return 101
         return None
-    mock_odoo.get_xml_id_res_id.side_effect = mock_get_xml_id
+    mock_odoo.resolve_many2one.side_effect = mock_resolve
+    mock_odoo.get_xml_id_res_id.return_value = None  # No hay pedido existente
     mock_odoo.get_tax_id.return_value = 501
 
     migrator = SalesOrderMigrator(
@@ -146,7 +134,13 @@ def test_migrator_run_dry_run():
 
 def test_migrator_run_creation():
     mock_odoo = MagicMock()
-    mock_odoo.get_xml_id_res_id.side_effect = lambda xml_id, model: 101 if model == "res.partner" else None
+    # resolve_many2one devuelve partner 101; get_xml_id_res_id None (no pedido existente)
+    def mock_resolve(value, model, **kwargs):
+        if model == "res.partner":
+            return 101
+        return None
+    mock_odoo.resolve_many2one.side_effect = mock_resolve
+    mock_odoo.get_xml_id_res_id.return_value = None
     mock_odoo.get_tax_id.return_value = 501
     mock_odoo.filter_vals.side_effect = lambda model, vals: vals
     mock_odoo.create.return_value = 1001
@@ -192,13 +186,14 @@ def test_migrator_run_creation():
 
 def test_migrator_run_update_existing_confirmed():
     mock_odoo = MagicMock()
-    # Odoo responses:
-    # 1. Partner resolution -> 101
-    # 2. Existing order check -> 1001
-    # 3. read state -> [{'state': 'sale'}]
-    def mock_get_xml_id(xml_id, model):
+    # resolve_many2one para partners → 101; para pedidos la busqueda es por get_xml_id_res_id
+    def mock_resolve(value, model, **kwargs):
         if model == "res.partner":
             return 101
+        return None
+    mock_odoo.resolve_many2one.side_effect = mock_resolve
+
+    def mock_get_xml_id(xml_id, model):
         if model == "sale.order" and "SO_2026_PED_1" in xml_id:
             return 1001
         return None
@@ -233,22 +228,21 @@ def test_migrator_run_update_existing_confirmed():
     assert stats.updated == 1
     assert len(stats.errors) == 0
 
-    # Verify action_cancel and action_draft were called to revert state
     mock_odoo.execute.assert_any_call("sale.order", "action_cancel", [1001])
     mock_odoo.execute.assert_any_call("sale.order", "action_draft", [1001])
-    
-    # Verify write was called with replacement lines (5, 0, 0)
-    mock_odoo.write.assert_called_once()
-    write_vals = mock_odoo.write.call_args[0][2]
-    assert write_vals["order_line"][0] == (5, 0, 0)
-    
-    # Verify action_confirm was called again
+
+    # write puede llamarse 2 veces (líneas + fecha)
+    assert mock_odoo.write.call_count >= 1
+    first_write_vals = mock_odoo.write.call_args_list[0][0][2]
+    assert first_write_vals["order_line"][0] == (5, 0, 0)
+
     mock_odoo.execute.assert_any_call("sale.order", "action_confirm", [1001])
 
 
 def test_migrator_run_validation_errors():
     mock_odoo = MagicMock()
     # Partner not found
+    mock_odoo.resolve_many2one.return_value = None
     mock_odoo.get_xml_id_res_id.return_value = None
     mock_odoo.search.return_value = []
 
@@ -264,7 +258,8 @@ def test_migrator_run_validation_errors():
     assert "No se pudo encontrar ningún cliente" in stats.errors[0]["error"]
 
     # Row with no lines
-    mock_odoo.get_xml_id_res_id.return_value = 101  # Partner resolved
+    mock_odoo.resolve_many2one.return_value = 101
+    mock_odoo.get_xml_id_res_id.return_value = None
     rows = [{"CODPED": "PED-ERR", "CLIPED": "C001", "_lines": []}]
     stats = migrator.run(rows, total=1, dry_run=False)
     assert len(stats.errors) == 1

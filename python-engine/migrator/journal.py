@@ -151,7 +151,7 @@ class JournalEntryMigrator:
         return None
 
     def _resolve_partner(self, partner_code: str | None, is_supplier: bool = False) -> int | None:
-        """Busca el ID de un partner en Odoo."""
+        """Busca el ID de un partner en Odoo: ID externo → ref → nombre."""
         if not partner_code:
             return None
 
@@ -160,35 +160,25 @@ class JournalEntryMigrator:
         if cache_key in self._partner_cache:
             return self._partner_cache[cache_key]
 
-        try:
-            # 1. Buscar por XML ID con los prefijos cli_ y pro_/prov_
-            prefixes = ["cli_"] if not is_supplier else ["pro_", "prov_"]
-            for pref in prefixes:
-                xml_id = key if key.startswith(pref) else f"{pref}{key}"
-                partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
-                if partner_id:
-                    self._partner_cache[cache_key] = partner_id
-                    return partner_id
-
-            # 2. Buscar por ref
-            ids = self.odoo.search("res.partner", [("ref", "=", key)])
-            if ids:
-                self._partner_cache[cache_key] = ids[0]
-                return ids[0]
-
-            # 3. Buscar por name
-            ids = self.odoo.search("res.partner", [("name", "=", key)])
-            if ids:
-                self._partner_cache[cache_key] = ids[0]
-                return ids[0]
-        except Exception as e:
-            log.warning("Error al resolver partner '%s': %s", key, e)
+        # Probar primero con el prefijo correspondiente (cli_ o pro_/prov_)
+        prefixes = ["cli_"] if not is_supplier else ["pro_", "prov_"]
+        for prefix in prefixes:
+            result = self.odoo.resolve_many2one(
+                key,
+                "res.partner",
+                xml_id_prefix=prefix,
+                extra_fields=["ref"],
+                cache=None,  # Usamos cache_key propio a continuación
+            )
+            if result:
+                self._partner_cache[cache_key] = result
+                return result
 
         self._partner_cache[cache_key] = None
         return None
 
     def _resolve_journal(self, name_or_code: str | None) -> int | None:
-        """Busca el ID del diario contable por código o nombre, o devuelve el diario por defecto."""
+        """Busca el ID del diario contable: ID externo → code → nombre."""
         if not name_or_code:
             return None
 
@@ -196,23 +186,13 @@ class JournalEntryMigrator:
         if key in self._journal_cache:
             return self._journal_cache[key]
 
-        try:
-            # 1. Buscar por código exacto
-            ids = self.odoo.search("account.journal", [("code", "=", key)])
-            if ids:
-                self._journal_cache[key] = ids[0]
-                return ids[0]
-
-            # 2. Buscar por nombre exacto
-            ids = self.odoo.search("account.journal", [("name", "=", key)])
-            if ids:
-                self._journal_cache[key] = ids[0]
-                return ids[0]
-        except Exception as e:
-            log.warning("Error al resolver diario '%s': %s", key, e)
-
-        self._journal_cache[key] = None
-        return None
+        result = self.odoo.resolve_many2one(
+            key,
+            "account.journal",
+            extra_fields=["code"],
+            cache=self._journal_cache,
+        )
+        return result
 
     def _process_row(self, row: dict[str, Any], dry_run: bool) -> dict[str, Any]:
         """Transforma un asiento agrupado y resuelve todas sus cuentas y dependencias."""

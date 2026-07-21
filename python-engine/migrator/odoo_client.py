@@ -279,6 +279,95 @@ class OdooClient:
         recs = self.search_read("ir.model.data", domain, ["res_id"], limit=1)
         return recs[0]["res_id"] if recs else None
 
+    def resolve_many2one(
+        self,
+        value: str | None,
+        model: str,
+        *,
+        xml_id_prefix: str = "",
+        name_field: str = "name",
+        extra_fields: list[str] | None = None,
+        cache: dict | None = None,
+    ) -> int | None:
+        """Resolución universal de un campo Many2one con prioridad:
+        1. ID externo (ir.model.data) — con prefijo y sin prefijo.
+        2. Campos de código extra (ref, default_code, barcode, …).
+        3. Nombre exacto (name_field).
+
+        Args:
+            value:        Valor a resolver (código, nombre, XML ID…).
+            model:        Modelo Odoo destino (ej. 'res.partner').
+            xml_id_prefix: Prefijo para construir el XML ID (ej. 'cli_').
+            name_field:   Campo de nombre a usar en el fallback (por defecto 'name').
+            extra_fields: Lista de campos extra a probar antes del nombre
+                          (ej. ['ref', 'default_code', 'barcode']).
+            cache:        Diccionario mutable compartido por el llamante para
+                          evitar consultas repetidas. Si es None no se cachea.
+
+        Returns:
+            ID entero del registro en Odoo, o None si no se encuentra.
+        """
+        if not value:
+            return None
+
+        key = str(value).strip()
+        if not key:
+            return None
+
+        # Consultar caché
+        if cache is not None and key in cache:
+            return cache[key]
+
+        result: int | None = None
+
+        try:
+            # ── 1. Buscar por ID externo ──────────────────────────────────────
+            # Intentamos con y sin prefijo para mayor flexibilidad.
+            candidates: list[str] = []
+            if xml_id_prefix:
+                if not key.startswith(xml_id_prefix):
+                    candidates.append(f"{xml_id_prefix}{key}")
+                candidates.append(key)
+            else:
+                candidates.append(key)
+
+            for xml_id in candidates:
+                result = self.get_xml_id_res_id(xml_id, model)
+                if result:
+                    break
+
+            # ── 2. Campos de código extra ─────────────────────────────────────
+            if not result and extra_fields:
+                for field_name in extra_fields:
+                    ids = self.search(model, [(field_name, "=", key)], limit=1)
+                    if ids:
+                        result = ids[0]
+                        break
+
+            # ── 3. Fallback por nombre exacto ─────────────────────────────────
+            if not result:
+                ids = self.search(model, [(name_field, "=", key)], limit=1)
+                if ids:
+                    result = ids[0]
+
+        except Exception as e:
+            log.warning(
+                "Error al resolver Many2one '%s' en modelo '%s' con valor '%s': %s",
+                name_field, model, key, e,
+            )
+
+        # Guardar en caché (incluso None, para no reintentar valores fallidos)
+        if cache is not None:
+            cache[key] = result
+
+        if not result:
+            log.warning(
+                "Many2one no encontrado en '%s': valor='%s' (prefijo='%s', extras=%s)",
+                model, key, xml_id_prefix, extra_fields,
+            )
+
+        return result
+
     def create_or_update_xml_id(self, xml_id: str, model: str, res_id: int) -> None:
         """Crea o actualiza la vinculación de ID externa en ir.model.data."""
         if not xml_id or not res_id:

@@ -79,74 +79,24 @@ class PurchaseOrderMigrator:
         self._tax_cache: dict[tuple[str, str], int | None] = {}
 
     def _resolve_partner(self, partner_code: str | None) -> int | None:
-        """Busca el ID del partner proveedor en Odoo usando ID externo, ref o nombre."""
-        if not partner_code:
-            return None
-
-        key = str(partner_code).strip()
-        if key in self._partner_cache:
-            return self._partner_cache[key]
-
-        try:
-            # 1. Buscar por XML ID (proveedores típicamente empiezan por pro_)
-            xml_id = key if key.startswith("pro_") else f"pro_{key}"
-            partner_id = self.odoo.get_xml_id_res_id(xml_id, "res.partner")
-            if partner_id:
-                self._partner_cache[key] = partner_id
-                return partner_id
-
-            # 2. Buscar por ref
-            ids = self.odoo.search("res.partner", [("ref", "=", key)])
-            if ids:
-                self._partner_cache[key] = ids[0]
-                return ids[0]
-
-            # 3. Buscar por name
-            ids = self.odoo.search("res.partner", [("name", "=", key)])
-            if ids:
-                self._partner_cache[key] = ids[0]
-                return ids[0]
-        except Exception as e:
-            log.warning("Error al resolver partner '%s': %s", key, e)
-
-        self._partner_cache[key] = None
-        return None
+        """Busca el ID del partner proveedor en Odoo: ID externo → ref → nombre."""
+        return self.odoo.resolve_many2one(
+            partner_code,
+            "res.partner",
+            xml_id_prefix="pro_",
+            extra_fields=["ref"],
+            cache=self._partner_cache,
+        )
 
     def _resolve_product(self, product_code: str | None) -> int | None:
-        """Busca el ID del producto (variante) en Odoo."""
-        if not product_code:
-            return None
-
-        key = str(product_code).strip()
-        if key in self._product_cache:
-            return self._product_cache[key]
-
-        try:
-            # 1. Buscar por default_code (SKU)
-            ids = self.odoo.search("product.product", [("default_code", "=", key)])
-            if ids:
-                self._product_cache[key] = ids[0]
-                return ids[0]
-
-            # 2. Buscar por XML ID de product.template
-            xml_id = key if key.startswith("art_") else f"art_{key}"
-            tmpl_id = self.odoo.get_xml_id_res_id(xml_id, "product.template")
-            if tmpl_id:
-                p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_id)])
-                if p_ids:
-                    self._product_cache[key] = p_ids[0]
-                    return p_ids[0]
-
-            # 3. Buscar por código de barras
-            ids = self.odoo.search("product.product", [("barcode", "=", key)])
-            if ids:
-                self._product_cache[key] = ids[0]
-                return ids[0]
-        except Exception as e:
-            log.warning("Error al resolver producto '%s': %s", key, e)
-
-        self._product_cache[key] = None
-        return None
+        """Busca el ID del producto (variante) en Odoo: ID externo → default_code → barcode → nombre."""
+        return self.odoo.resolve_many2one(
+            product_code,
+            "product.product",
+            xml_id_prefix="art_",
+            extra_fields=["default_code", "barcode"],
+            cache=self._product_cache,
+        )
 
     def _resolve_tax(self, tax_value: str | None) -> int | None:
         """Busca un impuesto de compra en Odoo por nombre, porcentaje o aproximación."""

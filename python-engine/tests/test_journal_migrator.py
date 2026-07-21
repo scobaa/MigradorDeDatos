@@ -68,26 +68,28 @@ def test_resolve_partner_implicit():
         mapping={}
     )
 
-    # Buscar implicitamente cliente
-    mock_odoo.get_xml_id_res_id.return_value = 888
-    # 43000028 -> cliente 28 -> busca cli_28
+    # Buscar implicitamente cliente via resolve_many2one
+    mock_odoo.resolve_many2one.return_value = 888
     partner_id = migrator._resolve_partner("28", is_supplier=False)
     assert partner_id == 888
-    mock_odoo.get_xml_id_res_id.assert_called_with("cli_28", "res.partner")
+    mock_odoo.resolve_many2one.assert_called_with(
+        "28",
+        "res.partner",
+        xml_id_prefix="cli_",
+        extra_fields=["ref"],
+        cache=None,
+    )
 
 
 def test_migrator_run_creation():
     mock_odoo = MagicMock()
     
     # Mocks de Odoo:
-    # 1. No existe el asiento (get_xml_id_res_id -> None)
+    # 1. No existe el asiento (get_xml_id_res_id -> None para asientos)
     # 2. Cuentas contables resolviendo a IDs
-    # 3. Cliente resolviendo a ID
-    def mock_xml_id(xml_id, model):
-        if model == "res.partner" and xml_id == "cli_28":
-            return 208
-        return None
-    mock_odoo.get_xml_id_res_id.side_effect = mock_xml_id
+    # 3. Cliente resolviendo a ID via resolve_many2one
+    mock_odoo.get_xml_id_res_id.return_value = None  # No hay asiento existente
+    mock_odoo.resolve_many2one.return_value = 208     # Partner resuelto
     
     def mock_search(model, domain):
         if model == "account.account":

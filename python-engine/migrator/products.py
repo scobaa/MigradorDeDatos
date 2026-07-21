@@ -150,7 +150,7 @@ class ProductMigrator:
             raise RuntimeError("No hay categorías disponibles en Odoo para productos.")
 
     def _resolve_uom(self, uom_name: str | None) -> int:
-        """Busca Unidad de Medida en Odoo por nombre, con fallback a ID=1 (Units/Unidades)."""
+        """Busca Unidad de Medida en Odoo: ID externo → nombre exacto → ilike → fallback ID 1."""
         if not uom_name:
             return 1
 
@@ -159,11 +159,12 @@ class ProductMigrator:
             return self._uom_cache[key]
 
         try:
-            ids = self.odoo.search("uom.uom", [("name", "=ilike", uom_name)])
-            if ids:
-                self._uom_cache[key] = ids[0]
-                return ids[0]
+            # 1. ID externo + nombre exacto (via resolve_many2one)
+            result = self.odoo.resolve_many2one(uom_name, "uom.uom", cache=self._uom_cache)
+            if result:
+                return result
 
+            # 2. Coincidencia ilike (insensible a mayúsculas y tildes)
             ids = self.odoo.search("uom.uom", [("name", "ilike", uom_name)])
             if ids:
                 self._uom_cache[key] = ids[0]
