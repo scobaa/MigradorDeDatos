@@ -241,6 +241,8 @@ class ProductMigrator:
 
     def _resolve_fields_in_place(self, vals: dict[str, Any]) -> None:
         """Resuelve los campos de relación Many2one y Many2many in-place."""
+        log.info("DEBUG VALS ANTES DE RESOLVER: %s", vals)
+        
         # Categoría: soporta mapeo via "_category" (recomendado) o directamente "categ_id" como string
         category_name = vals.pop("_category", None)
         if not category_name:
@@ -249,6 +251,8 @@ class ProductMigrator:
             if isinstance(raw_categ, str):
                 category_name = raw_categ
                 vals.pop("categ_id", None)
+                
+        log.info("DEBUG CATEGORY_NAME RESUELTO: %s", category_name)
         vals["categ_id"] = self._resolve_category(category_name)
 
         # Unidades de medida: soporta "_uom" o "uom_id" directamente como string
