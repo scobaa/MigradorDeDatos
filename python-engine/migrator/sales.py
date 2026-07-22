@@ -106,13 +106,16 @@ class SalesOrderMigrator:
                 return result
             
             # Si no se encontró por código, intentar también como nombre (activos)
+            log.info("DEBUG _resolve_product: '%s' no encontrado como código/ID. Buscando por nombre...", product_code)
             try:
                 ids = self.odoo.search("product.product", [("name", "=", product_code)], limit=1)
                 if ids:
+                    log.info("DEBUG: Encontrado por nombre exacto, id=%s", ids[0])
                     self._product_cache[product_code] = ids[0]
                     return ids[0]
                 ids = self.odoo.search("product.product", [("name", "ilike", product_code)], limit=1)
                 if ids:
+                    log.info("DEBUG: Encontrado por nombre ilike, id=%s", ids[0])
                     self._product_cache[product_code] = ids[0]
                     return ids[0]
                 # También en product.template
@@ -120,8 +123,10 @@ class SalesOrderMigrator:
                 if tmpl_ids:
                     p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                     if p_ids:
+                        log.info("DEBUG: Encontrado via plantilla, id=%s", p_ids[0])
                         self._product_cache[product_code] = p_ids[0]
                         return p_ids[0]
+                log.info("DEBUG: '%s' no encontrado ni por nombre en activos.", product_code)
             except Exception as e:
                 log.warning("Error al resolver producto por nombre (code como nombre) '%s': %s", product_code, e)
 
