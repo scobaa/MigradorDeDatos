@@ -157,52 +157,60 @@ class SalesOrderMigrator:
 
         # Si llegamos aquí, no lo hemos encontrado activo. Busquemos en los archivados.
         try:
-            domain = [("active", "=", False)]
+            # Construir lista de condiciones candidatas (OR entre ellas)
             conditions = []
             if product_code:
-                conditions.extend([("default_code", "=", product_code), ("barcode", "=", product_code)])
-                # También buscar el code como si fuera un nombre (por si el usuario puso el nombre en la columna product)
+                conditions.append(("default_code", "=", product_code))
+                conditions.append(("barcode", "=", product_code))
                 conditions.append(("name", "ilike", product_code))
             if product_name:
                 name_clean = " ".join(str(product_name).split())
                 conditions.append(("name", "ilike", name_clean))
-                
+
             if conditions:
-                if len(conditions) > 1:
-                    domain.extend(["|"] * (len(conditions) - 1))
-                domain.extend(conditions)
-                
+                # Construir dominio: active=False AND (cond1 OR cond2 OR ...)
+                # En Odoo: ['&', ('active','=',False), '|', cond1, '|', cond2, cond3]
+                if len(conditions) == 1:
+                    domain = [("active", "=", False), conditions[0]]
+                else:
+                    # N condiciones necesitan N-1 operadores '|'
+                    or_chain = []
+                    for _ in range(len(conditions) - 1):
+                        or_chain.append("|")
+                    or_chain.extend(conditions)
+                    domain = ["&", ("active", "=", False)] + or_chain
+
                 archived_ids = self.odoo.search("product.product", domain, limit=1)
                 if archived_ids:
                     arch_id = archived_ids[0]
                     self.odoo.write("product.product", [arch_id], {"active": True})
-                    log.info("Producto archivado encontrado y reactivado: ID %s (código: %s, nombre: %s)", arch_id, product_code, product_name)
-                    
-                    if product_code:
-                        self._product_cache[product_code] = arch_id
-                    if product_name:
-                        self._product_cache[f"__name__{name_clean}"] = arch_id
-                        
+                    log.info("Producto archivado encontrado y reactivado: ID %s (código: %s)", arch_id, product_code or product_name)
+                    cache_key = product_code or f"__name__{product_name}"
+                    self._product_cache[cache_key] = arch_id
                     return arch_id
-                    
-                # Si no se encontró la variante, probar si es una plantilla archivada
+
+                # Variante no encontrada → buscar plantilla archivada por nombre
+                search_name = None
+                if product_code:
+                    search_name = product_code
                 if product_name:
-                    tmpl_domain = [("active", "=", False), ("name", "ilike", name_clean)]
+                    search_name = " ".join(str(product_name).split())
+
+                if search_name:
+                    tmpl_domain = ["&", ("active", "=", False), ("name", "ilike", search_name)]
                     tmpl_ids = self.odoo.search("product.template", tmpl_domain, limit=1)
                     if tmpl_ids:
                         self.odoo.write("product.template", [tmpl_ids[0]], {"active": True})
-                        log.info("Plantilla archivada reactivada: ID %s", tmpl_ids[0])
-                        # Al activar la plantilla, las variantes podrían activarse. Buscamos cualquier variante de esta plantilla
+                        log.info("Plantilla archivada reactivada: ID %s (nombre: %s)", tmpl_ids[0], search_name)
+                        # Buscar variante activa (puede haberse activado con la plantilla)
                         p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                         if not p_ids:
-                            p_ids = self.odoo.search("product.product", [("active", "=", False), ("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
+                            # Si sigue archivada la variante, activarla también
+                            p_ids = self.odoo.search("product.product", ["&", ("active", "=", False), ("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                         if p_ids:
                             self.odoo.write("product.product", [p_ids[0]], {"active": True})
-                            
-                            if product_code:
-                                self._product_cache[product_code] = p_ids[0]
-                            if product_name:
-                                self._product_cache[f"__name__{name_clean}"] = p_ids[0]
+                            cache_key = product_code or f"__name__{search_name}"
+                            self._product_cache[cache_key] = p_ids[0]
                             return p_ids[0]
         except Exception as e:
             log.warning("Error al buscar/reactivar producto archivado: %s", e)
