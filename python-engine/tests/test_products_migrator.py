@@ -195,6 +195,7 @@ def test_product_migrator_xml_id_option():
 
 def test_product_migrator_hierarchical_category():
     mock_odoo = MagicMock()
+    mock_odoo.get_xml_id_res_id.return_value = None
     
     # Mock search calls:
     # 1. Search for first level "Ferretería": returns [] (not found)
@@ -245,6 +246,7 @@ def test_product_migrator_hierarchical_category():
 
 def test_product_migrator_category_translation():
     mock_odoo = MagicMock()
+    mock_odoo.get_xml_id_res_id.return_value = None
     mock_odoo.search.return_value = [100]  # Found category tools
     
     families = {

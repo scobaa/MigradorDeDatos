@@ -109,12 +109,21 @@ class ProductMigrator:
             return self._resolve_single_category(cat_name, None, cat_name)
 
     def _resolve_single_category(self, name: str, parent_id: int | None, full_path: str) -> int:
-        """Busca o crea una única categoría dado su nombre y su categoría padre."""
+        """Busca o crea una única categoría dado su nombre (o XML ID) y su categoría padre."""
         key = full_path.lower()
         if key in self._categ_cache:
             return self._categ_cache[key]
 
         try:
+            # 1. Intentar buscar por ID externo (XML ID) si no es una ruta compuesta
+            if parent_id is None:
+                # Probar tal cual y con prefijo 'cat_' (por si acaso)
+                xml_id_res = self.odoo.get_xml_id_res_id(name, "product.category")
+                if xml_id_res:
+                    self._categ_cache[key] = xml_id_res
+                    return xml_id_res
+
+            # 2. Buscar por nombre exacto en Odoo
             domain = [("name", "=ilike", name)]
             if parent_id is not None:
                 domain.append(("parent_id", "=", parent_id))
