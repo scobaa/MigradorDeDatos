@@ -105,27 +105,26 @@ class SalesOrderMigrator:
             if result:
                 return result
             
-            # Si no se encontró por código, intentar también como nombre (activos)
+            # IMPORTANTE: No usamos self._product_cache aquí porque resolve_many2one
+            # ya guardó None en caché para product_code. Buscamos directo en Odoo.
             log.info("DEBUG _resolve_product: '%s' no encontrado como código/ID. Buscando por nombre...", product_code)
             try:
-                ids = self.odoo.search("product.product", [("name", "=", product_code)], limit=1)
-                if ids:
-                    log.info("DEBUG: Encontrado por nombre exacto, id=%s", ids[0])
-                    self._product_cache[product_code] = ids[0]
-                    return ids[0]
-                ids = self.odoo.search("product.product", [("name", "ilike", product_code)], limit=1)
-                if ids:
-                    log.info("DEBUG: Encontrado por nombre ilike, id=%s", ids[0])
-                    self._product_cache[product_code] = ids[0]
-                    return ids[0]
-                # También en product.template
-                tmpl_ids = self.odoo.search("product.template", [("name", "ilike", product_code)], limit=1)
+                # Buscar primero por nombre en product.template (más fiable que product.product)
+                tmpl_ids = self.odoo.search("product.template", [("name", "=", product_code)], limit=1)
+                if not tmpl_ids:
+                    tmpl_ids = self.odoo.search("product.template", [("name", "ilike", product_code)], limit=1)
                 if tmpl_ids:
                     p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                     if p_ids:
-                        log.info("DEBUG: Encontrado via plantilla, id=%s", p_ids[0])
+                        log.info("DEBUG: Encontrado via plantilla id=%s → variante id=%s", tmpl_ids[0], p_ids[0])
                         self._product_cache[product_code] = p_ids[0]
                         return p_ids[0]
+                # Fallback: buscar directamente en product.product por nombre
+                ids = self.odoo.search("product.product", [("name", "ilike", product_code)], limit=1)
+                if ids:
+                    log.info("DEBUG: Encontrado en product.product por nombre ilike, id=%s", ids[0])
+                    self._product_cache[product_code] = ids[0]
+                    return ids[0]
                 log.info("DEBUG: '%s' no encontrado ni por nombre en activos.", product_code)
             except Exception as e:
                 log.warning("Error al resolver producto por nombre (code como nombre) '%s': %s", product_code, e)
