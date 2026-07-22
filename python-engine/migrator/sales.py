@@ -107,34 +107,36 @@ class SalesOrderMigrator:
             
             # IMPORTANTE: No usamos self._product_cache aquí porque resolve_many2one
             # ya guardó None en caché para product_code. Buscamos directo en Odoo.
-            log.info("DEBUG _resolve_product: '%s' no encontrado como código/ID. Buscando por nombre...", product_code)
+            # Usamos search_all_companies para evitar el filtro de multi-compañía.
+            log.info("DEBUG _resolve_product: '%s' no encontrado como código/ID. Buscando por nombre (todas las compañías)...", product_code)
             try:
-                # Búsqueda exacta en product.template
-                tmpl_ids_exact = self.odoo.search("product.template", [("name", "=", product_code)], limit=5)
-                log.info("DEBUG tmpl exact='%s': %s", product_code, tmpl_ids_exact)
-                
-                # Búsqueda ilike en product.template
-                tmpl_ids_ilike = self.odoo.search("product.template", [("name", "ilike", product_code)], limit=5)
-                log.info("DEBUG tmpl ilike='%s': %s", product_code, tmpl_ids_ilike)
-                
+                # Búsqueda exacta en product.template (sin filtro de compañía)
+                tmpl_ids_exact = self.odoo.search_all_companies("product.template", [("name", "=", product_code)], limit=5)
+                log.info("DEBUG tmpl exact (all companies)='%s': %s", product_code, tmpl_ids_exact)
+
+                # Búsqueda ilike en product.template (sin filtro de compañía)
+                tmpl_ids_ilike = self.odoo.search_all_companies("product.template", [("name", "ilike", product_code)], limit=5)
+                log.info("DEBUG tmpl ilike (all companies)='%s': %s", product_code, tmpl_ids_ilike)
+
                 tmpl_ids = tmpl_ids_exact or tmpl_ids_ilike
                 if tmpl_ids:
-                    p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
+                    p_ids = self.odoo.search_all_companies("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
                     log.info("DEBUG variantes de tmpl %s: %s", tmpl_ids[0], p_ids)
                     if p_ids:
                         log.info("DEBUG: Encontrado via plantilla id=%s → variante id=%s", tmpl_ids[0], p_ids[0])
                         self._product_cache[product_code] = p_ids[0]
                         return p_ids[0]
                 # Fallback: buscar directamente en product.product por nombre
-                pp_ids = self.odoo.search("product.product", [("name", "ilike", product_code)], limit=5)
-                log.info("DEBUG product.product ilike='%s': %s", product_code, pp_ids)
+                pp_ids = self.odoo.search_all_companies("product.product", [("name", "ilike", product_code)], limit=5)
+                log.info("DEBUG product.product ilike (all companies)='%s': %s", product_code, pp_ids)
                 if pp_ids:
                     log.info("DEBUG: Encontrado en product.product por nombre ilike, id=%s", pp_ids[0])
                     self._product_cache[product_code] = pp_ids[0]
                     return pp_ids[0]
-                log.info("DEBUG: '%s' no encontrado ni por nombre en activos.", product_code)
+                log.info("DEBUG: '%s' no encontrado ni por nombre en ninguna compañía.", product_code)
             except Exception as e:
                 log.warning("Error al resolver producto por nombre (code como nombre) '%s': %s", product_code, e)
+
 
         # Fallback por nombre (ilike en product.product y product.template)
         if product_name:

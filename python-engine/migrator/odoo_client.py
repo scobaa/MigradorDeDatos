@@ -157,6 +157,23 @@ class OdooClient:
     ) -> list[int]:
         return self.execute(model, "search", domain, limit=limit, offset=offset)
 
+    def search_all_companies(
+        self,
+        model: str,
+        domain: list,
+        limit: int = 0,
+    ) -> list[int]:
+        """Búsqueda sin filtro de compañía activa.
+        
+        Útil cuando un producto/contacto puede pertenecer a cualquier compañía
+        y queremos encontrarlo independientemente del contexto actual del usuario.
+        """
+        return self.execute(
+            model, "search", domain,
+            limit=limit,
+            context={"allowed_company_ids": False},
+        )
+
     def search_read(
         self,
         model: str,
