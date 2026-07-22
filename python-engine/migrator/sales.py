@@ -135,6 +135,56 @@ class SalesOrderMigrator:
                 log.warning("Error al resolver producto por nombre '%s': %s", name_clean, e)
             self._product_cache[cache_key] = None
 
+        # Si llegamos aquí, no lo hemos encontrado activo. Busquemos en los archivados.
+        try:
+            domain = [("active", "=", False)]
+            conditions = []
+            if product_code:
+                conditions.extend([("default_code", "=", product_code), ("barcode", "=", product_code)])
+            if product_name:
+                name_clean = " ".join(str(product_name).split())
+                conditions.append(("name", "ilike", name_clean))
+                
+            if conditions:
+                if len(conditions) > 1:
+                    domain.extend(["|"] * (len(conditions) - 1))
+                domain.extend(conditions)
+                
+                archived_ids = self.odoo.search("product.product", domain, limit=1)
+                if archived_ids:
+                    arch_id = archived_ids[0]
+                    self.odoo.write("product.product", [arch_id], {"active": True})
+                    log.info("Producto archivado encontrado y reactivado: ID %s (código: %s, nombre: %s)", arch_id, product_code, product_name)
+                    
+                    if product_code:
+                        self._product_cache[product_code] = arch_id
+                    if product_name:
+                        self._product_cache[f"__name__{name_clean}"] = arch_id
+                        
+                    return arch_id
+                    
+                # Si no se encontró la variante, probar si es una plantilla archivada
+                if product_name:
+                    tmpl_domain = [("active", "=", False), ("name", "ilike", name_clean)]
+                    tmpl_ids = self.odoo.search("product.template", tmpl_domain, limit=1)
+                    if tmpl_ids:
+                        self.odoo.write("product.template", [tmpl_ids[0]], {"active": True})
+                        log.info("Plantilla archivada reactivada: ID %s", tmpl_ids[0])
+                        # Al activar la plantilla, las variantes podrían activarse. Buscamos cualquier variante de esta plantilla
+                        p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
+                        if not p_ids:
+                            p_ids = self.odoo.search("product.product", [("active", "=", False), ("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
+                        if p_ids:
+                            self.odoo.write("product.product", [p_ids[0]], {"active": True})
+                            
+                            if product_code:
+                                self._product_cache[product_code] = p_ids[0]
+                            if product_name:
+                                self._product_cache[f"__name__{name_clean}"] = p_ids[0]
+                            return p_ids[0]
+        except Exception as e:
+            log.warning("Error al buscar/reactivar producto archivado: %s", e)
+
         return None
 
     def _resolve_tax(self, tax_value: str | None) -> int | None:

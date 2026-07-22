@@ -90,13 +90,35 @@ class PurchaseOrderMigrator:
 
     def _resolve_product(self, product_code: str | None) -> int | None:
         """Busca el ID del producto (variante) en Odoo: ID externo → default_code → barcode → nombre."""
-        return self.odoo.resolve_many2one(
+        result = self.odoo.resolve_many2one(
             product_code,
             "product.product",
             xml_id_prefix="art_",
             extra_fields=["default_code", "barcode"],
             cache=self._product_cache,
         )
+        if result:
+            return result
+            
+        # Si no lo encontramos activo, buscar en archivados
+        try:
+            domain = [
+                ("active", "=", False),
+                "|",
+                ("default_code", "=", product_code),
+                ("barcode", "=", product_code)
+            ]
+            archived_ids = self.odoo.search("product.product", domain, limit=1)
+            if archived_ids:
+                arch_id = archived_ids[0]
+                self.odoo.write("product.product", [arch_id], {"active": True})
+                log.info("Producto archivado de compra reactivado: ID %s (código: %s)", arch_id, product_code)
+                self._product_cache[product_code] = arch_id
+                return arch_id
+        except Exception as e:
+            log.warning("Error al reactivar producto archivado en compras: %s", e)
+            
+        return None
 
     def _resolve_tax(self, tax_value: str | None) -> int | None:
         """Busca un impuesto de compra en Odoo por nombre, porcentaje o aproximación."""
