@@ -104,6 +104,26 @@ class SalesOrderMigrator:
             )
             if result:
                 return result
+            
+            # Si no se encontró por código, intentar también como nombre (activos)
+            try:
+                ids = self.odoo.search("product.product", [("name", "=", product_code)], limit=1)
+                if ids:
+                    self._product_cache[product_code] = ids[0]
+                    return ids[0]
+                ids = self.odoo.search("product.product", [("name", "ilike", product_code)], limit=1)
+                if ids:
+                    self._product_cache[product_code] = ids[0]
+                    return ids[0]
+                # También en product.template
+                tmpl_ids = self.odoo.search("product.template", [("name", "ilike", product_code)], limit=1)
+                if tmpl_ids:
+                    p_ids = self.odoo.search("product.product", [("product_tmpl_id", "=", tmpl_ids[0])], limit=1)
+                    if p_ids:
+                        self._product_cache[product_code] = p_ids[0]
+                        return p_ids[0]
+            except Exception as e:
+                log.warning("Error al resolver producto por nombre (code como nombre) '%s': %s", product_code, e)
 
         # Fallback por nombre (ilike en product.product y product.template)
         if product_name:
@@ -141,6 +161,8 @@ class SalesOrderMigrator:
             conditions = []
             if product_code:
                 conditions.extend([("default_code", "=", product_code), ("barcode", "=", product_code)])
+                # También buscar el code como si fuera un nombre (por si el usuario puso el nombre en la columna product)
+                conditions.append(("name", "ilike", product_code))
             if product_name:
                 name_clean = " ".join(str(product_name).split())
                 conditions.append(("name", "ilike", name_clean))
