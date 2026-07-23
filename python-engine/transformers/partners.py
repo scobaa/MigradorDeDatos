@@ -41,6 +41,8 @@ SUPPORTED_FIELDS = {
     "comment",
     "_country",  # → country_id
     "_state",    # → state_id
+    "_account_payable",   # → property_account_payable_id  (código de cuenta, ej. '400000')
+    "_account_receivable", # → property_account_receivable_id (código de cuenta, ej. '430000')
 }
 
 # Palabras clave que delatan una persona jurídica (empresa).
@@ -225,6 +227,11 @@ def transform_partner(
                     cleaned = "other"
                 else:
                     cleaned = "contact"
+        elif odoo_field in ("_account_payable", "_account_receivable"):
+            # Pasar el código de cuenta tal cual (ej. '400000') para que el migrador lo resuelva
+            cleaned = clean_str(raw)
+            if cleaned and cleaned.endswith(".0"):
+                cleaned = cleaned[:-2]
         else:
             cleaned = clean_str(raw)
 

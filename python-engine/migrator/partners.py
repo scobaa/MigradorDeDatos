@@ -179,6 +179,29 @@ class PartnerMigrator:
 
     # ─── Deduplicación ─────────────────────────────────────────
 
+    def _resolve_accounts(self, vals: dict[str, Any]) -> None:
+        """Convierte _account_payable/_account_receivable (código) en los IDs de Odoo (in place)."""
+        payable_code = vals.pop("_account_payable", None)
+        receivable_code = vals.pop("_account_receivable", None)
+
+        if payable_code:
+            acc_id = self.odoo.get_account_id(str(payable_code).strip())
+            if acc_id:
+                vals["property_account_payable_id"] = acc_id
+                log.debug("Cuenta por pagar resuelta: %s → id=%s", payable_code, acc_id)
+            else:
+                log.warning("Cuenta por pagar no encontrada en Odoo: %r", payable_code)
+
+        if receivable_code:
+            acc_id = self.odoo.get_account_id(str(receivable_code).strip())
+            if acc_id:
+                vals["property_account_receivable_id"] = acc_id
+                log.debug("Cuenta por cobrar resuelta: %s → id=%s", receivable_code, acc_id)
+            else:
+                log.warning("Cuenta por cobrar no encontrada en Odoo: %r", receivable_code)
+
+
+
     def find_duplicate(self, vals: dict[str, Any]) -> int | None:
         """
         Busca un partner existente según prioridad (CLAUDE.md):
@@ -284,6 +307,7 @@ class PartnerMigrator:
                 if self.options.ref_prefix and "ref" in vals:
                     vals["ref"] = f"{self.options.ref_prefix}{vals['ref']}"
                 self._resolve_geo(vals)
+                self._resolve_accounts(vals)
                 vals = self.odoo.filter_vals(PARTNER_MODEL, vals)
 
                 # Extraer XML ID si aplica
