@@ -200,6 +200,61 @@ class PartnerMigrator:
             else:
                 log.warning("Cuenta por cobrar no encontrada en Odoo: %r", receivable_code)
 
+    # Campos extra a probar por modelo relacionado (además del nombre)
+    _EXTRA_SEARCH_FIELDS: dict[str, list[str]] = {
+        "account.account": ["code"],
+        "product.product": ["default_code", "barcode"],
+        "product.template": ["default_code"],
+        "res.partner": ["ref", "vat"],
+        "account.tax": ["name"],
+        "uom.uom": [],
+    }
+
+    def _resolve_many2one_fields(self, vals: dict[str, Any]) -> None:
+        """Resuelve automáticamente cualquier campo Many2one que tenga un valor en texto.
+
+        Consulta los metadatos del modelo para saber el tipo y el modelo relacionado de
+        cada campo, y llama a resolve_many2one para buscar por ID externo o nombre.
+        Los campos que no se puedan resolver se eliminan de vals para no causar errores.
+        """
+        try:
+            fields_info = self.odoo.get_fields_info(PARTNER_MODEL)
+        except Exception as e:
+            log.warning("No se pudo obtener metadatos de campos de %s: %s", PARTNER_MODEL, e)
+            return
+
+        for field_name in list(vals.keys()):
+            value = vals[field_name]
+            # Si ya es un entero (ID resuelto) o está vacío, nada que hacer
+            if isinstance(value, int) or not value:
+                continue
+
+            field_meta = fields_info.get(field_name, {})
+            if field_meta.get("type") != "many2one":
+                continue
+
+            related_model = field_meta.get("relation")
+            if not related_model:
+                continue
+
+            str_value = str(value).strip()
+            extra_fields = self._EXTRA_SEARCH_FIELDS.get(related_model, [])
+
+            resolved_id = self.odoo.resolve_many2one(
+                str_value,
+                related_model,
+                extra_fields=extra_fields,
+            )
+
+            if resolved_id:
+                vals[field_name] = resolved_id
+                log.debug("Campo Many2one '%s' resuelto: %r → id=%s (modelo: %s)", field_name, str_value, resolved_id, related_model)
+            else:
+                log.warning("No se pudo resolver campo '%s' con valor %r en modelo '%s'. Se omitirá.", field_name, str_value, related_model)
+                del vals[field_name]
+
+
+
 
 
     def find_duplicate(self, vals: dict[str, Any]) -> int | None:
@@ -308,6 +363,7 @@ class PartnerMigrator:
                     vals["ref"] = f"{self.options.ref_prefix}{vals['ref']}"
                 self._resolve_geo(vals)
                 self._resolve_accounts(vals)
+                self._resolve_many2one_fields(vals)
                 vals = self.odoo.filter_vals(PARTNER_MODEL, vals)
 
                 # Extraer XML ID si aplica

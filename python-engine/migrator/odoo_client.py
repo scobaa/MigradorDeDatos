@@ -88,6 +88,7 @@ class OdooClient:
         self._accounts: dict[str, int] = {}
         self._taxes: dict[tuple[str, str], int] = {}
         self._valid_fields: dict[str, set[str]] = {}
+        self._fields_info: dict[str, dict] = {}  # model → {field: {type, relation, ...}}
 
     # ─── Conexión ──────────────────────────────────────────
 
@@ -235,10 +236,17 @@ class OdooClient:
     def get_valid_fields(self, model: str) -> set[str]:
         """Retorna el conjunto de campos válidos del modelo (cacheado)."""
         if model not in self._valid_fields:
-            info = self.execute(model, "fields_get", attributes=["string"])
-            self._valid_fields[model] = set(info.keys())
-            log.debug("Campos válidos de %s: %d", model, len(self._valid_fields[model]))
+            self.get_fields_info(model)  # pobla la caché de campos
         return self._valid_fields[model]
+
+    def get_fields_info(self, model: str) -> dict:
+        """Retorna metadatos de campos del modelo: tipo, modelo relacionado, etc. (cacheado)."""
+        if model not in self._fields_info:
+            info = self.execute(model, "fields_get", attributes=["type", "relation", "string"])
+            self._fields_info[model] = info
+            self._valid_fields[model] = set(info.keys())
+            log.debug("Campos de %s: %d", model, len(info))
+        return self._fields_info[model]
 
     def filter_vals(self, model: str, vals: dict) -> dict:
         """Elimina de vals los campos que no existen en el modelo Odoo y normaliza None a False."""
