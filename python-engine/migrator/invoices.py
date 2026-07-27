@@ -79,15 +79,79 @@ class InvoiceMigrator:
         self._tax_cache: dict[tuple[str, str], int | None] = {}
 
     def _resolve_partner(self, partner_code: str | None) -> int | None:
-        """Busca el ID del partner en Odoo: ID externo → ref → nombre."""
+        """Busca el ID del partner en Odoo: ID externo → ref → nombre con fallback inteligente."""
+        if not partner_code:
+            return None
+
+        clean_code = str(partner_code).strip()
+        if clean_code.endswith(".0"):
+            clean_code = clean_code[:-2]
+
         prefix = "cli_" if self.move_type == "out_invoice" else "prov_"
-        return self.odoo.resolve_many2one(
-            partner_code,
+
+        # 1. Búsqueda directa
+        res_id = self.odoo.resolve_many2one(
+            clean_code,
             "res.partner",
             xml_id_prefix=prefix,
             extra_fields=["ref"],
             cache=self._partner_cache,
         )
+        if res_id:
+            return res_id
+
+        # 2. Si viene compuesto '00012-DESSI MOBEL SL', probar primero el código y luego el nombre
+        if "-" in clean_code:
+            parts = clean_code.split("-", 1)
+            code_part = parts[0].strip()
+            name_part = parts[1].strip()
+
+            if code_part:
+                res_id = self.odoo.resolve_many2one(
+                    code_part,
+                    "res.partner",
+                    xml_id_prefix=prefix,
+                    extra_fields=["ref"],
+                    cache=self._partner_cache,
+                )
+                if not res_id and code_part.lstrip("0"):
+                    res_id = self.odoo.resolve_many2one(
+                        code_part.lstrip("0"),
+                        "res.partner",
+                        xml_id_prefix=prefix,
+                        extra_fields=["ref"],
+                        cache=self._partner_cache,
+                    )
+                if res_id:
+                    return res_id
+
+            if name_part:
+                res_id = self.odoo.resolve_many2one(
+                    name_part,
+                    "res.partner",
+                    xml_id_prefix=prefix,
+                    extra_fields=["ref"],
+                    cache=self._partner_cache,
+                )
+                if res_id:
+                    return res_id
+
+        # 3. Si es numérico '00012', intentar sin ceros a la izquierda ('12')
+        if clean_code.isdigit() and clean_code.startswith("0"):
+            unpadded = clean_code.lstrip("0")
+            if unpadded:
+                res_id = self.odoo.resolve_many2one(
+                    unpadded,
+                    "res.partner",
+                    xml_id_prefix=prefix,
+                    extra_fields=["ref"],
+                    cache=self._partner_cache,
+                )
+                if res_id:
+                    return res_id
+
+        return None
+
 
     def _resolve_product(self, product_code: str | None) -> int | None:
         """Busca el ID del producto (variante) en Odoo: ID externo → default_code → barcode → nombre."""
