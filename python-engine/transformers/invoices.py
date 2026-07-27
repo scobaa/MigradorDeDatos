@@ -147,8 +147,11 @@ def transform_invoice(
         if raw is None:
             continue
 
-        if odoo_field == "invoice_date":
-            vals[odoo_field] = clean_date(raw)
+        if odoo_field in ("invoice_date", "date"):
+            clean_d = clean_date(raw)
+            if clean_d:
+                vals["invoice_date"] = clean_d
+                vals["date"] = clean_d
         elif odoo_field == "_partner_code":
             partner_code = clean_str(raw)
             if partner_code and partner_code.endswith(".0"):
@@ -158,6 +161,12 @@ def transform_invoice(
             cleaned = clean_str(raw)
             if cleaned is not None:
                 vals[odoo_field] = cleaned
+
+    # Sincronizar fecha si viene mapeada en cualquier variante
+    inv_date = vals.get("invoice_date") or vals.get("date")
+    if inv_date:
+        vals["invoice_date"] = inv_date
+        vals["date"] = inv_date
 
     if not vals.get("name"):
         # Generar un nombre temporal si no viene número de factura mapeado

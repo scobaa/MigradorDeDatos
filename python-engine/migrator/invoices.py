@@ -221,6 +221,12 @@ class InvoiceMigrator:
             )
         vals["partner_id"] = partner_id
 
+        # Asegurar que invoice_date y date están ambos presentes y sincronizados
+        inv_date = vals.get("invoice_date") or vals.get("date")
+        if inv_date:
+            vals["invoice_date"] = inv_date
+            vals["date"] = inv_date
+
         # 2. Resolver líneas de factura
         lines = vals.pop("_lines", [])
         invoice_line_ids = []
