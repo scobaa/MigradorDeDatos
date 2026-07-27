@@ -94,17 +94,48 @@ class OdooClient:
 
     def connect(self) -> None:
         """Autentica contra Odoo. Lanza ConnectionError si falla."""
-        # Establecer el timeout predeterminado a nivel de socket para compatibilidad con todas las versiones de Python
-        socket.setdefaulttimeout(15.0)
-        common = xmlrpc.client.ServerProxy(f"{self.config.url}/xmlrpc/2/common", allow_none=True)
-        self.uid = common.authenticate(
-            self.config.db, self.config.username, self.config.password, {}
-        )
+        import ssl
+        import socket as _socket
+
+        # Timeout mayor para Odoo Online (SaaS) que puede ser más lento
+        _socket.setdefaulttimeout(30.0)
+
+        url = self.config.url
+
+        try:
+            common = xmlrpc.client.ServerProxy(
+                f"{url}/xmlrpc/2/common",
+                allow_none=True,
+            )
+            # version() es una llamada pública (sin auth) que comprueba conectividad
+            try:
+                common.version()
+            except Exception as e:
+                raise ConnectionError(
+                    f"No se puede conectar a '{url}'. "
+                    f"Verifica que la URL es correcta y el servidor está activo. "
+                    f"Detalle: {type(e).__name__}: {e}"
+                ) from e
+
+            self.uid = common.authenticate(
+                self.config.db, self.config.username, self.config.password, {}
+            )
+        except ConnectionError:
+            raise
+        except Exception as e:
+            raise ConnectionError(
+                f"Error de red/SSL al conectar a '{url}': {type(e).__name__}: {e}"
+            ) from e
+
         if not self.uid:
-            raise ConnectionError("Credenciales incorrectas o Odoo inaccesible")
+            raise ConnectionError(
+                f"Autenticación fallida en '{url}' (db='{self.config.db}', user='{self.config.username}'). "
+                "Comprueba: 1) Nombre de BD exacto, 2) Email de usuario, "
+                "3) Para Odoo Online usa una API Key (no la contraseña web)."
+            )
 
         self._models = xmlrpc.client.ServerProxy(
-            f"{self.config.url}/xmlrpc/2/object", allow_none=True
+            f"{url}/xmlrpc/2/object", allow_none=True
         )
         log.info("Conectado a Odoo db=%s uid=%s", self.config.db, self.uid)
 
@@ -116,7 +147,8 @@ class OdooClient:
             self.execute("res.partner", "check_access_rights", "read", raise_exception=False)
             return True, "Conexión OK"
         except Exception as e:
-            return False, f"Error: {e}"
+            return False, str(e)
+
 
     # ─── CRUD básico ────────────────────────────────────────
 
