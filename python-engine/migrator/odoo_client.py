@@ -231,14 +231,46 @@ class OdooClient:
         key = value.strip().lower()
         if not self._countries:
             self._load_countries()
-        return self._countries.get(key)
+
+        result = self._countries.get(key)
+        if result:
+            return result
+
+        # Fallback: búsqueda directa en Odoo si el caché no tiene el país
+        # (ocurre en Odoo Online si search_read de res.country devuelve vacío)
+        try:
+            clean = value.strip()
+            recs = self.search_read(
+                "res.country",
+                ["|", ("code", "=", clean.upper()), ("name", "ilike", clean)],
+                ["id", "name", "code"],
+                limit=1,
+            )
+            if recs:
+                r = recs[0]
+                cid = r["id"]
+                self._countries[r["name"].lower()] = cid
+                self._countries[r["code"].lower()] = cid
+                log.info("País encontrado por búsqueda directa: %r → id=%s (%s)", clean, cid, r["name"])
+                return cid
+        except Exception as e:
+            log.debug("Fallback búsqueda de país '%s' falló: %s", value, e)
+
+        return None
 
     def _load_countries(self) -> None:
-        log.debug("Cargando catálogo res.country")
-        recs = self.search_read("res.country", [], ["id", "name", "code"])
-        for r in recs:
-            self._countries[r["name"].lower()] = r["id"]
-            self._countries[r["code"].lower()] = r["id"]
+        log.info("Cargando catálogo res.country...")
+        try:
+            recs = self.search_read("res.country", [], ["id", "name", "code"])
+            for r in recs:
+                self._countries[r["name"].lower()] = r["id"]
+                self._countries[r["code"].lower()] = r["id"]
+            log.info("Catálogo res.country cargado: %d países", len(recs))
+            if not recs:
+                log.warning("res.country devolvió 0 registros — el fallback por búsqueda directa se usará.")
+        except Exception as e:
+            log.warning("Error al cargar catálogo res.country: %s — se usará búsqueda directa.", e)
+
 
     def get_state_id(self, country_id: int, value: str | None) -> int | None:
         if not value or not country_id:
