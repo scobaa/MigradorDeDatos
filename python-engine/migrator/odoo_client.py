@@ -143,8 +143,8 @@ class OdooClient:
         """Prueba la conexión sin lanzar excepción. Retorna (ok, mensaje)."""
         try:
             self.connect()
-            # Comprobar que tenemos acceso a res.partner
-            self.execute("res.partner", "check_access_rights", "read", raise_exception=False)
+            # Verificar acceso de lectura con search_count (compatible con todas las versiones de Odoo)
+            self.execute("res.partner", "search_count", [])
             return True, "Conexión OK"
         except Exception as e:
             return False, str(e)
