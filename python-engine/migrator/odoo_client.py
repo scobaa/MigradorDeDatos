@@ -245,12 +245,36 @@ class OdooClient:
             return None
         if not self._states:
             self._load_states()
+
+        clean = value.strip()
         # Buscar primero por el valor tal cual, luego sin tildes.
-        for key in (value.strip().lower(), _ascii_lower(value.strip())):
+        for key in (clean.lower(), _ascii_lower(clean)):
             sid = self._states.get((country_id, key))
             if sid:
                 return sid
+
+        # Fallback: búsqueda ilike directa en Odoo (cubre nombres no contemplados en caché)
+        try:
+            recs = self.search_read(
+                "res.country.state",
+                [("country_id", "=", country_id), ("name", "ilike", clean)],
+                ["id", "name"],
+                limit=1,
+            )
+            if recs:
+                sid = recs[0]["id"]
+                log.debug("Provincia encontrada por ilike: %r → id=%s (%s)", clean, sid, recs[0]["name"])
+                # Guardar en caché para próximas búsquedas
+                for key in _state_name_variants(recs[0]["name"]):
+                    self._states.setdefault((country_id, key), sid)
+                self._states.setdefault((country_id, clean.lower()), sid)
+                self._states.setdefault((country_id, _ascii_lower(clean)), sid)
+                return sid
+        except Exception as e:
+            log.debug("Fallback ilike para provincia '%s' falló: %s", clean, e)
+
         return None
+
 
     def _load_states(self) -> None:
         log.debug("Cargando catálogo res.country.state")
