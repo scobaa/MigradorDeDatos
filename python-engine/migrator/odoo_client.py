@@ -237,15 +237,26 @@ class OdooClient:
             return result
 
         # Fallback: búsqueda directa en Odoo si el caché no tiene el país
-        # (ocurre en Odoo Online si search_read de res.country devuelve vacío)
+        # Primero por código ISO exacto (ej. "ES"), luego por nombre exacto.
+        # IMPORTANTE: No usar ilike en código ni nombre — coincidiría con países
+        # equivocados (ej. "ES" ilike → "Bangladés").
         try:
             clean = value.strip()
+            # Intento 1: código ISO exacto (2 letras)
             recs = self.search_read(
                 "res.country",
-                ["|", ("code", "=", clean.upper()), ("name", "ilike", clean)],
+                [("code", "=", clean.upper())],
                 ["id", "name", "code"],
                 limit=1,
             )
+            if not recs:
+                # Intento 2: nombre exacto
+                recs = self.search_read(
+                    "res.country",
+                    [("name", "=", clean)],
+                    ["id", "name", "code"],
+                    limit=1,
+                )
             if recs:
                 r = recs[0]
                 cid = r["id"]
@@ -257,6 +268,7 @@ class OdooClient:
             log.debug("Fallback búsqueda de país '%s' falló: %s", value, e)
 
         return None
+
 
     def _load_countries(self) -> None:
         log.info("Cargando catálogo res.country...")
