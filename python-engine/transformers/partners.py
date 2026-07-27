@@ -232,8 +232,16 @@ def transform_partner(
             cleaned = clean_str(raw)
             if cleaned and cleaned.endswith(".0"):
                 cleaned = cleaned[:-2]
+        elif odoo_field == "zip":
+            # El CP puede venir como número float de Excel (ej. 50018.0 → '50018')
+            cleaned = clean_str(raw)
+            if cleaned and cleaned.endswith(".0") and cleaned[:-2].isdigit():
+                cleaned = cleaned[:-2]
         else:
             cleaned = clean_str(raw)
+            # Quitar el sufijo .0 de cualquier campo que Excel haya interpretado como número
+            if cleaned and cleaned.endswith(".0") and cleaned[:-2].isdigit():
+                cleaned = cleaned[:-2]
 
         if cleaned is not None:
             vals[odoo_field] = cleaned

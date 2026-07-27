@@ -145,6 +145,9 @@ class PartnerMigrator:
         country_text = vals.pop("_country", None)
         state_text = vals.pop("_state", None)
 
+        log.info("DEBUG _resolve_geo: _country=%r _state=%r default_country=%r",
+                 country_text, state_text, self.options.default_country)
+
         # FactuSOL guarda el país como código ISO numérico (ej. "724" = España).
         # Convertimos a alfa-2 antes de buscar en Odoo.
         if country_text and country_text.strip().isdigit():
@@ -161,6 +164,7 @@ class PartnerMigrator:
             country_id = self.odoo.get_country_id(country_text)
             if country_id:
                 vals["country_id"] = country_id
+                log.info("DEBUG _resolve_geo: país '%s' → id=%s", country_text, country_id)
             else:
                 log.warning("País no encontrado en Odoo: %r", country_text)
 
@@ -168,14 +172,19 @@ class PartnerMigrator:
         # (caso habitual: PAICLI vacío en registros españoles de FactuSOL).
         if state_text and not country_id:
             country_id = self.odoo.get_country_id(self.options.default_country)
+            log.info("DEBUG _resolve_geo: sin país explícito, usando default_country='%s' → id=%s",
+                     self.options.default_country, country_id)
+            if country_id:
+                vals["country_id"] = country_id
 
         if state_text and country_id:
             resolved_state = self._STATE_ALIASES.get(state_text.lower(), state_text)
             state_id = self.odoo.get_state_id(country_id, resolved_state)
             if state_id:
                 vals["state_id"] = state_id
+                log.info("DEBUG _resolve_geo: provincia '%s' → id=%s", resolved_state, state_id)
             else:
-                log.warning("Provincia no encontrada: %r", state_text)
+                log.warning("Provincia no encontrada: %r (intentado como %r)", state_text, resolved_state)
 
     # ─── Deduplicación ─────────────────────────────────────────
 
