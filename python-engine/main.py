@@ -772,8 +772,7 @@ def handle_run_migration(args: dict) -> None:
                 if is_configured():
                     from datetime import datetime
                     to_email = (
-                        opts.get("notification_email")
-                        or args.get("user_email")
+                        args.get("user_email")
                         or (odoo_args.get("username") if "@" in str(odoo_args.get("username", "")) else None)
                     )
                     if to_email:

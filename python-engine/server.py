@@ -183,8 +183,7 @@ def _send_summary_email(
         sys.stderr.write("[INFO] Envío de email deshabilitado para esta migración.\n")
         return
 
-    dest_email = opts.get("notification_email") or to_email
-    if not dest_email:
+    if not to_email:
         return
 
     try:
@@ -219,7 +218,7 @@ def _send_summary_email(
         }
 
         send_migration_summary(
-            to_email=dest_email,
+            to_email=to_email,
             summary=summary,
             log_file_path=log_file_path,
         )

@@ -283,7 +283,6 @@ export default function OdooMigration() {
   const [updateExisting, setUpdateExisting] = useState(true);
   const [dryRun, setDryRun] = useState(false);
   const [sendEmail, setSendEmail] = useState(false);
-  const [notificationEmail, setNotificationEmail] = useState("");
 
   // Progreso y resultado
   const [running, setRunning] = useState(false);
@@ -360,7 +359,6 @@ export default function OdooMigration() {
             options: {
               update_existing: updateExisting,
               send_email: sendEmail,
-              notification_email: notificationEmail || undefined,
             },
           },
         }),
@@ -598,7 +596,7 @@ export default function OdooMigration() {
               </div>
             </label>
 
-            <div className="pt-2 border-t border-border space-y-2">
+            <div className="pt-2 border-t border-border">
               <label className="flex items-center gap-3 cursor-pointer">
                 <div
                   onClick={() => setSendEmail(!sendEmail)}
@@ -612,21 +610,9 @@ export default function OdooMigration() {
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-white">Enviar correo de notificación al finalizar</p>
-                  <p className="text-[10px] text-muted-foreground">Envía un resumen completo y logs por correo al terminar.</p>
+                  <p className="text-[10px] text-muted-foreground">Envía un resumen completo y logs al correo de tu sesión al terminar.</p>
                 </div>
               </label>
-              {sendEmail && (
-                <div className="pl-13 pt-1 flex items-center gap-3">
-                  <span className="text-[10px] text-muted-foreground">Destino:</span>
-                  <input
-                    type="email"
-                    value={notificationEmail}
-                    onChange={(e) => setNotificationEmail(e.target.value)}
-                    placeholder="ejemplo@empresa.com"
-                    className="bg-secondary/50 border border-border rounded-lg px-2.5 py-1 text-xs text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 font-mono w-64"
-                  />
-                </div>
-              )}
             </div>
           </div>
 
