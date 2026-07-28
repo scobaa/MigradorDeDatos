@@ -282,6 +282,8 @@ export default function OdooMigration() {
   const [selectedModel, setSelectedModel] = useState("res.partner");
   const [updateExisting, setUpdateExisting] = useState(true);
   const [dryRun, setDryRun] = useState(false);
+  const [sendEmail, setSendEmail] = useState(false);
+  const [notificationEmail, setNotificationEmail] = useState("");
 
   // Progreso y resultado
   const [running, setRunning] = useState(false);
@@ -355,7 +357,11 @@ export default function OdooMigration() {
             odoo_dest: dstCreds,
             model: selectedModel,
             dry_run: dryRun,
-            options: { update_existing: updateExisting },
+            options: {
+              update_existing: updateExisting,
+              send_email: sendEmail,
+              notification_email: notificationEmail || undefined,
+            },
           },
         }),
       });
@@ -591,6 +597,37 @@ export default function OdooMigration() {
                 <p className="text-[10px] text-muted-foreground">No escribe nada. Muestra cuántos registros se crearían.</p>
               </div>
             </label>
+
+            <div className="pt-2 border-t border-border space-y-2">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div
+                  onClick={() => setSendEmail(!sendEmail)}
+                  className={`w-10 h-5 rounded-full transition-colors ${
+                    sendEmail ? "bg-primary" : "bg-secondary border border-border"
+                  } relative`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                    sendEmail ? "translate-x-5" : "translate-x-0.5"
+                  }`} />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-white">Enviar correo de notificación al finalizar</p>
+                  <p className="text-[10px] text-muted-foreground">Envía un resumen completo y logs por correo al terminar.</p>
+                </div>
+              </label>
+              {sendEmail && (
+                <div className="pl-13 pt-1 flex items-center gap-3">
+                  <span className="text-[10px] text-muted-foreground">Destino:</span>
+                  <input
+                    type="email"
+                    value={notificationEmail}
+                    onChange={(e) => setNotificationEmail(e.target.value)}
+                    placeholder="ejemplo@empresa.com"
+                    className="bg-secondary/50 border border-border rounded-lg px-2.5 py-1 text-xs text-white placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 font-mono w-64"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex justify-between">

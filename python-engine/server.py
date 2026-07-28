@@ -175,8 +175,18 @@ def _send_summary_email(
     error: str | None = None,
 ):
     """Envía el email de resumen si to_email está disponible y SMTP configurado."""
-    if not to_email:
+    args = payload.get("args", {})
+    opts = args.get("options", {})
+
+    # Si send_email está explícitamente desactivado en las opciones
+    if "send_email" in opts and not opts["send_email"]:
+        sys.stderr.write("[INFO] Envío de email deshabilitado para esta migración.\n")
         return
+
+    dest_email = opts.get("notification_email") or to_email
+    if not dest_email:
+        return
+
     try:
         from email_notifier import send_migration_summary, is_configured
         if not is_configured():
@@ -209,7 +219,7 @@ def _send_summary_email(
         }
 
         send_migration_summary(
-            to_email=to_email,
+            to_email=dest_email,
             summary=summary,
             log_file_path=log_file_path,
         )

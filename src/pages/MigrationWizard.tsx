@@ -37,6 +37,8 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
   const [forceInvoiced, setForceInvoiced] = useState(false);
   const [postEntries, setPostEntries] = useState(true);
   const [formatName, setFormatName] = useState(true);
+  const [sendEmail, setSendEmail] = useState(false);
+  const [notificationEmail, setNotificationEmail] = useState("");
   const [migrationStats, setMigrationStats] = useState<{
     created: number;
     updated: number;
@@ -722,6 +724,8 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
           force_invoiced: forceInvoiced,
           post_entries: postEntries,
           format_name: formatName,
+          send_email: sendEmail,
+          notification_email: notificationEmail || (client?.odoo_user && client.odoo_user.includes("@") ? client.odoo_user : undefined),
         },
         dry_run: isDryRun,
       });
@@ -1283,8 +1287,37 @@ export default function MigrationWizard({ clientId, onBack }: MigrationWizardPro
                   checked={updateExisting}
                   disabled={isMigrating}
                   onChange={(e) => setUpdateExisting(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
+                  className="w-4 h-4 accent-primary cursor-pointer"
                 />
+              </div>
+              <div className="h-[1px] bg-border" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs">Enviar correo de notificación al finalizar</h4>
+                    <p className="text-[10px] text-muted-foreground">Envía un resumen completo y logs por correo electrónico cuando termine la migración.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={sendEmail}
+                    disabled={isMigrating}
+                    onChange={(e) => setSendEmail(e.target.checked)}
+                    className="w-4 h-4 accent-primary cursor-pointer"
+                  />
+                </div>
+                {sendEmail && (
+                  <div className="pt-1 flex items-center justify-between gap-4">
+                    <span className="text-[10px] text-muted-foreground">Correo de destino:</span>
+                    <input
+                      type="email"
+                      value={notificationEmail}
+                      disabled={isMigrating}
+                      onChange={(e) => setNotificationEmail(e.target.value)}
+                      placeholder={client?.odoo_user && client.odoo_user.includes("@") ? client.odoo_user : "ejemplo@correo.com"}
+                      className="bg-secondary border border-border rounded px-2.5 py-1 text-white outline-none focus:border-primary/50 text-xs w-60 text-left font-mono"
+                    />
+                  </div>
+                )}
               </div>
               <div className="h-[1px] bg-border" />
               <div className="flex items-center justify-between gap-4">

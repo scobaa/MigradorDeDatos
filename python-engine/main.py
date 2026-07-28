@@ -766,6 +766,33 @@ def handle_run_migration(args: dict) -> None:
             rows_to_migrate, total=total, dry_run=dry_run
         )
 
+        if opts.get("send_email"):
+            try:
+                from email_notifier import send_migration_summary, is_configured
+                if is_configured():
+                    from datetime import datetime
+                    to_email = (
+                        opts.get("notification_email")
+                        or args.get("user_email")
+                        or (odoo_args.get("username") if "@" in str(odoo_args.get("username", "")) else None)
+                    )
+                    if to_email:
+                        summary = {
+                            "status": "done",
+                            "model": model,
+                            "model_label": model,
+                            "src_url": os.path.basename(path),
+                            "dst_url": odoo_args.get("url", "-"),
+                            "dry_run": dry_run,
+                            "started_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                            "finished_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                            "duration_seconds": 0,
+                            "stats": stats.as_dict(),
+                        }
+                        send_migration_summary(to_email=to_email, summary=summary)
+            except Exception as email_err:
+                log.warning("No se pudo enviar el email de resumen: %s", email_err)
+
     respond("ok", data={"dry_run": dry_run, "stats": stats.as_dict()})
 
 
