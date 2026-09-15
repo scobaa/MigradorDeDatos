@@ -99,12 +99,16 @@ Write-Host "  Frontend compilado en $APP_DIR\dist" -ForegroundColor Green
 # ── 6. Configurar entorno Python ──────────────────────────────────────────────
 Write-Step "6/7" "Configurando Motor Python..."
 
-# Localizar python.exe
-$pythonExe = (Get-Command python -ErrorAction SilentlyContinue)?.Source
-if (-not $pythonExe) { $pythonExe = "C:\Python311\python.exe" }
+# Localizar python.exe (compatible con PowerShell 5)
+$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+if ($pythonCmd) {
+    $pythonExe = $pythonCmd.Source
+} else {
+    $pythonExe = "C:\Python311\python.exe"
+}
 if (-not (Test-Path $pythonExe)) {
-    $pythonExe = Get-ChildItem "C:\Python*" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue |
-                 Select-Object -First 1 -ExpandProperty FullName
+    $found = Get-ChildItem "C:\Python*" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { $pythonExe = $found.FullName }
 }
 Write-Host "  Usando Python: $pythonExe" -ForegroundColor Gray
 
@@ -165,9 +169,9 @@ Write-Host "  Servicio $pythonSvc iniciado." -ForegroundColor Green
 
 # --- Configurar y registrar Nginx ---
 # Buscar donde choco instalo nginx
-$nginxExe = Get-ChildItem "C:\ProgramData\chocolatey" -Recurse -Filter "nginx.exe" -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty FullName
-$nginxBase = Split-Path $nginxExe -Parent
+$nginxExeObj = Get-ChildItem "C:\ProgramData\chocolatey" -Recurse -Filter "nginx.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+$nginxExe = if ($nginxExeObj) { $nginxExeObj.FullName } else { $null }
+$nginxBase = if ($nginxExe) { Split-Path $nginxExe -Parent } else { $null }
 
 if ($nginxBase -and (Test-Path $nginxExe)) {
     # Ruta con barras normales para nginx.conf
